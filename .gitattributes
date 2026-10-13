@@ -1,0 +1,29 @@
+# ==========================================
+# Line Ending Normalization
+# ==========================================
+# Automatically normalize line endings to LF for all text files
+* text=auto eol=lf
+
+# ==========================================
+# Explicit Text File Declarations
+# ==========================================
+*.rs      text diff=rust
+*.toml    text diff=toml
+*.md      text
+*.json    text
+*.yml     text
+*.yaml    text
+LICENSE*  text
+
+# ==========================================
+# Binary Files Protection
+# ==========================================
+# Treat analysis samples, patches, and compiled binaries as true binary files
+samples/* binary
+patches/* binary
+*.bin     binary
+*.elf     binary
+*.exe     binary
+*.dll     binary
+*.so      binary
+*.dylib   binary
