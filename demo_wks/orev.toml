@@ -1,0 +1,14 @@
+[project]
+name = "demo_wks"
+version = "0.1.0"
+authors = []
+
+[workspace]
+notes_dir = "notes"
+patches_dir = "patches"
+scripts_dir = "scripts"
+
+[targets]
+files = [
+    "samples/target_binary",
+]

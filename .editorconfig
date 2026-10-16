@@ -1,0 +1,14 @@
+root = true
+
+[*.sh]
+indent_style = space
+indent_size = 2
+shell_variant = bash
+binary_next_line = true
+switch_case_indent = true
+space_redirects = true
+
+[*.rs]
+indent_style = space
+indent_size = 4
+
