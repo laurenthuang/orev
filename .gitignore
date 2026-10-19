@@ -21,11 +21,9 @@
 Thumbs.db
 
 # ==========================================
-# Orev Binary Analysis Artifacts
+# Orev Binary Analysis Demo 
 # ==========================================
-# Target binaries in samples/ are usually large and shouldn't be committed to git
-/samples/*
-!/samples/.gitkeep
+demo_wks/**/*
 
 # Core dumps, logs, and temporary debugging outputs
 *.core

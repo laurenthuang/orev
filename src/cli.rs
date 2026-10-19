@@ -1,3 +1,4 @@
+// src/cli.rs
 use clap::{Parser, Subcommand};
 
 // ==========================================================
@@ -10,7 +11,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "orev",
     version, // <-- 这样写，clap 会在编译期自动读取 Cargo.toml 中的 version
-    about = "A modern binary analysis project manager"
+    about = "A modern binary analysis case manager for reverse engineering and security analysis"
 )]
 // Rust 函数默认是私有的，如果希望在模块外部可见，需要加上 pub 关键字。
 // 同样地，枚举和结构体也是默认私有的，所以我们在这里使用 pub modifier 使其在模块外部可见。
@@ -26,15 +27,15 @@ pub struct Cli {
 // Enum 可以定义一组互斥的变体（Variant），非常适合用来做 CLI 的子命令设计。
 #[derive(Subcommand)]
 pub enum Commands {
-    /// 初始化一个新的二进制分析工作区
+    /// 初始化一个新的二进制分析案例工作区
     Init {
         // 【Rust 基础概念：Option<T>】
         // Rust 没有 null。如果某个参数是可选的（用户可能传，也可能不传），
         // 必须用 Option 包裹。它有两个值：Some(T) 代表有值，None 代表没有值。
-        /// 可选的目标工作区路径（例如：`orev init ./crackme_dir`，不填则默认在当前目录）
+        /// 可选的目标案例工作区路径（例如：`orev init ./crackme_dir`，不填则默认在当前目录）
         path: Option<String>,
 
-        /// 可选的目标工作区名称（例如：`orev init ./crackme_dir -n my_project`，不填则默认使用目录名）
+        /// 可选的目标案例工作区名称（例如：`orev init ./crackme_dir -n my_project`，不填则默认使用目录名）
         #[arg(long)]
         name: Option<String>,
 
@@ -44,9 +45,9 @@ pub enum Commands {
         target: Vec<String>,
     },
 
-    /// 显示当前工作区的状态和配置信息
+    /// 显示当前分析案例工作区的状态和配置信息
     Status,
 
-    /// 对工作区完整性、系统环境以及外部逆向工具链进行健康诊断
+    /// 对分析案例工作区完整性、系统环境以及外部逆向工具链进行健康诊断
     Doctor,
 }
