@@ -1,0 +1,56 @@
+schema: orev/stage@v1.2
+stage: 30_decompile
+target_id: archerc7v5_up_201229_a1b2c3d4e5f6
+
+# 仅 00_inbox 阶段必填：主输入的实际文件名。保留原名，不重命名（见 ../01-layout/04-阶段产物清单.md）
+# 后续阶段一律用 $TARGET_INPUT 引用该文件，不得在命令中写死文件名
+# input_file: "ArcherC7v5_up_201229.bin"
+status: ok                 # pending | running | ok | failed | skipped（判据见 tool.selfcheck）
+started_at: 2026-10-14T14:25:49+08:00
+finished_at: 2026-10-14T14:41:02+08:00
+duration_s: 913
+
+tool:                      # T2：完整溯源
+  name: ghidra
+  version: "12.1.4"
+  # 命令里的 $TOOLS_ROOT / $TARGET / $TARGET_INPUT 由 runner 运行前展开：
+  #   $TOOLS_ROOT   = tools_root（见 ../01-layout/01-顶层布局.md）
+  #   $TARGET       = 本 target 目录的绝对路径
+  #   $TARGET_INPUT = $TARGET/00_inbox/<input_file> 的绝对路径
+  # 导入对象经 $TARGET_INPUT 引用；00_inbox 保留原始文件名，不改名
+  #   （见 ../01-layout/04-阶段产物清单.md），因此命令模板不依赖文件名。
+  # 原始文件名可能含空格、$、() 或前导 -，该变量在命令中必须加引号
+  cmd: "analyzeHeadless \"$TOOLS_ROOT/ghidra/working/router-2026q4/firmware/archerc7v5_up_201229_a1b2c3d4e5f6\" p -import \"$TARGET_INPUT\" -postScript DecompileAll.py"   # 绝对路径，不用 symlink（理由见 ../01-layout/01-顶层布局.md）
+  container: null           # 或 ghcr.io/org/ghidra:12.1.4@sha256:...
+  env_fingerprint: sha256:… # 取值自 state/env.md
+  # 工具工作区位置：一律在 tools/<tool>/working/<case-id>/，project_dir 相对之
+  project_dir: "ghidra/working/router-2026q4/firmware/archerc7v5_up_201229_a1b2c3d4e5f6"
+  # 实际位置 = tools_root/ + project_dir；「ghidra/」前缀即工具名，project_dir 内不再重复
+  # 工具自检：status=ok 的客观判据，见 ../04-appendix/02-Ghidra-12.1.4-对照.md
+  # 任何一项为 false / timeout_truncated 时，status 不得为 ok
+  selfcheck:
+    analyzed: true              # Ghidra Program 属性 ANALYZED
+    timeout_truncated: false    # -analysisTimeoutPerFile 是否触发过
+    fsrl: "file:/…/firmware/archerc7v5_up_201229_a1b2c3d4e5f6/00_inbox/ArcherC7v5_up_201229.bin"  # 导入时的文件位置，与 provenance.locator（原始来源）互校
+  # 仅 15_patch 阶段：只记路径与指纹，绝不记密钥
+  signing_material:
+    profile: corp-harmony-resign
+    keystore_path: /secure/keys/harmony.p12   # 路径可记
+    keystore_sha256: sha256:…
+    cert_subject: "CN=ReArk Test, O=Lab"
+
+inputs:                    # S6：引用而非复制
+  - path: "firmware/archerc7v5_up_201229_a1b2c3d4e5f6/20_static/out/headers.json"
+    sha256: "…"
+  - path: "firmware/archerc7v5_up_201229_a1b2c3d4e5f6/00_inbox/ArcherC7v5_up_201229.bin"
+    sha256: "…"
+
+outputs:
+  - path: "firmware/archerc7v5_up_201229_a1b2c3d4e5f6/30_decompile/out/usr_sbin_httpd/decompiled.c"
+    sha256: "…"
+    bytes: 52428800
+    retention: rebuildable           # 四个级别见 ../03-operations/01-保留分级与清理.md
+    tags: ["component=httpd", "thread=TH2"]
+
+notes: |
+  关闭了 full data reference analysis 以控制耗时。

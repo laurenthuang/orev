@@ -1,6 +1,7 @@
 use crate::config::Config;
 use std::env;
 use std::fs;
+use std::io;
 use std::path::Path;
 use std::process::Command;
 
@@ -56,50 +57,108 @@ fn check_ghidra_info() -> Option<String> {
 }
 
 /// 核心业务函数：执行 doctor 体检
-pub fn run_doctor() {
+pub fn run_doctor() -> io::Result<()> {
     println!("=== Orev Doctor: Environment & Workspace Diagnostic ===\n");
-    let current_dir = env::current_dir().expect("Failed to get current directory");
+    let current_dir = match env::current_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("Error: Failed to get current directory: {}", e);
+            return Err(e);
+        }
+    };
 
-    // 【Rust 基础概念：标准库内置常量】
+    // 💡标准库内置常量
     // std::env::consts::OS 和 ARCH 在编译期就已经被硬编码，零运行时开销。
     println!("--- System Environment ---");
     println!("Operating System: {}", std::env::consts::OS);
     println!("CPU Architecture: {}", std::env::consts::ARCH);
 
-    // 1. 检查 orev.toml 配置文件
+    // 1. 读取并校验配置
     let config_path = current_dir.join("orev.toml");
-    if config_path.exists() {
-        println!("[✓] `orev.toml` configuration found.");
-    } else {
-        println!("[X] `orev.toml` missing! (Run `orev init` to initialize)");
-        return;
+    let config_content = match fs::read_to_string(&config_path) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!("Error: Failed to read `{}`: {}", config_path.display(), e);
+            return Err(e);
+        }
+    };
+
+    let config: Config = match toml::from_str(&config_content) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Error: Failed to parse `{}`: {}", config_path.display(), e);
+            return Err(io::Error::new(io::ErrorKind::InvalidData, e));
+        }
+    };
+
+    println!("[✓] `orev.toml` configuration loaded and validated.");
+
+    let store_root = match config.storage.resolve_store_root(&current_dir) {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("Error: Failed to resolve storage.store_root: {}", e);
+            return Err(e);
+        }
+    };
+    let tools_root = match config.storage.resolve_tools_root(&current_dir) {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("Error: Failed to resolve storage.tools_root: {}", e);
+            return Err(e);
+        }
+    };
+
+    // 2. 检查核心工作区目录
+    let mut dirs = vec![
+        current_dir.join("kb"),
+        store_root,
+        tools_root,
+        current_dir.join("scripts"),
+        current_dir.join("state"),
+        current_dir.join(".orev"),
+    ];
+
+    if config.stages.iter().any(|stage| stage == "60_diff") {
+        dirs.push(current_dir.join("60_diff"));
     }
 
-    // 2. 检查核心工作区目录完整性
-    let dirs = ["samples", "notes", "patches", ".orev"];
-    for dir in &dirs {
-        let path = current_dir.join(dir);
-        if path.exists() && path.is_dir() {
-            println!("[✓] Directory `{}/` exists.", dir);
-        } else {
-            println!("[!] Directory `{}/` is missing.", dir);
+    if config.stages.iter().any(|stage| stage == "90_report") {
+        dirs.push(current_dir.join("90_report"));
+    }
+
+    for path in dirs {
+        match fs::metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => {
+                println!("[✓] Directory `{}` exists.", path.display());
+            }
+            Ok(_) => {
+                println!("[!] Expected a directory at `{}`.", path.display());
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                println!("[!] Directory `{}` is missing.", path.display());
+            }
+            Err(e) => {
+                eprintln!(
+                    "Error: Failed to inspect directory `{}`: {}",
+                    path.display(),
+                    e
+                );
+                return Err(e);
+            }
         }
     }
 
-    // 3. 校验托管的目标文件物理存活状态
-    let config_content = fs::read_to_string(&config_path).unwrap_or_default();
-    if let Ok(config) = toml::from_str::<Config>(&config_content) {
-        println!("\n--- Target Binaries Integrity ---");
-        if config.targets.files.is_empty() {
-            println!("[!] No targets registered in `orev.toml`.");
-        } else {
-            for file_path in &config.targets.files {
-                let target_abs = current_dir.join(file_path);
-                if target_abs.exists() {
-                    println!("[✓] Target file active on disk: `{}`", file_path);
-                } else {
-                    println!("[X] Target file missing on disk: `{}`", file_path);
-                }
+    // 3. 校验已注册目标的物理存在性
+    println!("\n--- Target Binaries Integrity ---");
+    if config.targets.files.is_empty() {
+        println!("[!] No targets registered in `orev.toml`.");
+    } else {
+        for file_path in &config.targets.files {
+            let target_abs = current_dir.join(file_path);
+            if target_abs.exists() {
+                println!("[✓] Target file active on disk: `{}`", file_path);
+            } else {
+                println!("[X] Target file missing on disk: `{}`", file_path);
             }
         }
     }
@@ -116,7 +175,7 @@ pub fn run_doctor() {
     let tools = [
         ("objdump", "--version"),
         ("readelf", "--version"),
-        ("r2", "-v"),
+        ("strings", "--version"),
     ];
 
     for (tool, arg) in tools {
@@ -132,6 +191,7 @@ pub fn run_doctor() {
     }
 
     println!("\nDoctor check completed.");
+    Ok(())
 }
 
 fn check_ghid_info_wrapper() -> Option<String> {

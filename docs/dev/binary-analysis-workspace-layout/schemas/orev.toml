@@ -1,0 +1,25 @@
+# orev.toml —— 扩展配置设计参考，非当前 PoC 可直接使用的完整配置
+# 当前 PoC 尚未实现 [sample] 与 [[diff]]，配置这些字段会明确报错。
+# 本样例未包含当前 PoC 必需的 [case] 与 [targets]；可运行配置见仓库 README。
+# 本文件合并了 ../01-layout/01-顶层布局.md 的存储根声明，与 ../01-layout/03-阶段目录契约.md 的阶段启用、差异任务、样本保留声明。
+# TOML 要求：标量键必须写在任何 [table] 之前，因此 stages 前置。
+
+stages = ["00_inbox", "15_patch", "20_static", "30_decompile", "50_findings"]
+
+[sample]
+retention_days = 90
+
+[storage]
+tools_root = "/mnt/bigdisk/orev-tools"   # 工具工作区的物理位置；省略则用 <workspace>/tools/
+store_root = "/mnt/bigdisk/orev-store"   # 冷区：trace / pcap；可与 tools_root 同盘，也可异盘
+
+# [[diff]] 可重复出现，每一组声明一次 60_diff 的两端。
+# name 必须能读作「从什么到什么」，它同时决定两个目录名：
+#   60_diff/out/<name>/                       （导出物，见 ../01-layout/04-阶段产物清单.md）
+#   tools/ghidra/working/<case-id>/ghidra-vt/<name>/  （VT 项目，见 ../04-appendix/02-Ghidra-12.1.4-对照.md）
+# 只有一组也必须命名：事后追加第二组时，未分桶的产物会被覆盖，而那是 permanent 级。
+[[diff]]
+name   = "124-to-125"
+base   = "nginx-1.24.0_9f8e7d6c5b4a"
+target = "nginx-1.25.0_1a2b3c4d5e6f"
+tool   = "bindiff@8"

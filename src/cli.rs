@@ -4,8 +4,8 @@ use clap::{Parser, Subcommand};
 // ==========================================================
 // 顶层命令行参数结构体
 // ==========================================================
-// 【Rust 基础概念：属性宏 #[derive(...)]】
-// 宏（Macro）是 Rust 编译时的代码生成器。#[derive(Parser)] 告诉编译器：
+// 【Rust 概念：派生属性】
+// #[derive(...)] 是一个属性，用于调用编译时的代码生成器（宏）。这里的 Parser 是一个派生宏，它告诉编译器：
 // “请自动为这个结构体生成解析命令行参数的底层代码，我不用自己写样板代码。”
 #[derive(Parser)]
 #[command(
@@ -23,9 +23,9 @@ pub struct Cli {
 // ==========================================================
 // 子命令枚举定义
 // ==========================================================
-// 【Rust 基础概念：枚举（Enum）】
+// 【Rust 概念：枚举（Enum）】
 // Enum 可以定义一组互斥的变体（Variant），非常适合用来做 CLI 的子命令设计。
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 pub enum Commands {
     /// 初始化一个新的二进制分析案例工作区
     Init {
@@ -35,14 +35,15 @@ pub enum Commands {
         /// 可选的目标案例工作区路径（例如：`orev init ./crackme_dir`，不填则默认在当前目录）
         path: Option<String>,
 
-        /// 可选的目标案例工作区名称（例如：`orev init ./crackme_dir -n my_project`，不填则默认使用目录名）
+        /// 可选的目标案例工作区名称（例如：`orev init ./crackme_dir --name my_case`，不填则默认使用目录名）
         #[arg(long)]
         name: Option<String>,
+    },
 
-        // 目标文件路径列表（Vec<String> 类似于动态数组）
-        /// 要分析的目标二进制文件路径（可以通过多次传入 -t 指定多个）
-        #[arg(short, long)]
-        target: Vec<String>,
+    /// 向分析案例工作区添加一个新的目标二进制文件
+    Target {
+        #[command(subcommand)]
+        command: TargetCommands,
     },
 
     /// 显示当前分析案例工作区的状态和配置信息
@@ -50,4 +51,26 @@ pub enum Commands {
 
     /// 对分析案例工作区完整性、系统环境以及外部逆向工具链进行健康诊断
     Doctor,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TargetCommands {
+    /// 导入新的分析目标 (遵循 v1.6 target-id 规范: <文件名slug>_<sha256[:12]>)
+    Add {
+        /// 目标可执行程序 / 固件 / 样本路径
+        #[arg(required = true)]
+        path: String,
+
+        /// 流水线类型: binary | firmware | sample
+        #[arg(short = 't', long = "type", default_value = "binary")]
+        target_type: String,
+
+        /// 可选自定义 slug 文件名称
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// 声明的版本号 (存放于 provenance.json declared_version 字段)
+        #[arg(short, long)]
+        version: Option<String>,
+    },
 }

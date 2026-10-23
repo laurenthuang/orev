@@ -1,0 +1,24 @@
+{
+  "schema": "orev/manifest@v1",
+  "case_id": "router-2026q4",
+  "question": "某型路由器 1.2.3 固件是否存在硬编码凭据与已知漏洞组件",
+  "conclusion": "存在 1 处硬编码凭据（F-003，confirmed）；3 个 CVE 影响组件",
+  "created": "2026-10-01", "sealed": "2026-10-14",
+  "analyst": "…",
+  "environment": {"os": "Ubuntu 22.04", "ghidra": "12.1.4", "env_fingerprint": "sha256:…"},
+  "targets": [
+    {"target_id": "archerc7v5_up_201229_a1b2c3d4e5f6",
+     "sha256": "…", "type": "firmware", "provenance": "官网下载 2026-10-12"}
+  ],
+  "artifacts": [
+    {"path": "firmware/archerc7v5_up_201229_a1b2c3d4e5f6/30_decompile/out/usr_sbin_httpd/decompiled.c",
+     "sha256": "…", "bytes": 52428800, "retention": "rebuildable"}
+  ],
+  "external_refs": [
+    {"path": "store/router-2026q4/firmware/archerc7v5_up_201229_a1b2c3d4e5f6/40_dynamic/out/trace-20261008.tar.zst", "sha256": "…", "note": "冷区：trace"},
+    {"path": "tools/ghidra/working/router-2026q4/firmware/archerc7v5_up_201229_a1b2c3d4e5f6",
+     "kind": "tool-project", "tool": "ghidra@12.1.4",
+     "sha256": null, "note": "工具工作区：含人工批注，整包拷贝且必须先关闭项目"}
+  ],
+  "findings_summary": {"confirmed": 1, "inferred": 5, "assumed": 6, "refuted": 0}
+}

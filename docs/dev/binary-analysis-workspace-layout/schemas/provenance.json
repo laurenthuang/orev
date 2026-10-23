@@ -1,0 +1,14 @@
+{
+  "schema": "orev/provenance@v1",
+  "target_id": "archerc7v5_up_201229_a1b2c3d4e5f6",
+  "acquired_at": "2026-10-12T09:31:00+08:00",
+  "acquired_by": "…",
+  "source": {
+    "type": "vendor-download",
+    "locator": "https://…/ArcherC7v5_up_201229.bin",
+    "declared_version": "1.2.3",
+    "alt_hashes": {"md5": "c3d4…", "sha1": "e5f6…"}
+  },
+  "authorization": {"ticket": "…", "scope": "static+dynamic", "expires": "…"},
+  "chain_of_custody": [{"at": "…", "by": "…", "action": "received"}]
+}

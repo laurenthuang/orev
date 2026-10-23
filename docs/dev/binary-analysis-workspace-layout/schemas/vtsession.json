@@ -1,0 +1,14 @@
+{
+  "schema": "orev/vtsession@v1",
+  "tool": "ghidra-vt@12.1.4",
+  "session_name": "124-to-125",
+  "source":      {"target_id": "nginx-1.24.0_9f8e7d6c5b4a",
+                  "program": "nginx-1.24.0", "sha256": "…"},
+  "destination": {"target_id": "nginx-1.25.0_1a2b3c4d5e6f",
+                  "program": "nginx-1.25.0", "sha256": "…"},
+  "correlators": ["Exact Function Bytes", "Exact Symbol Name", "Combined Function and Data"],
+  "counts": {"associations": 812, "matches": 640, "markup_items": 233},
+  "markup_applied": {"function_name": 210, "comment": 18, "datatype": 5},
+  "status": "ok",
+  "ts": "2026-10-18T11:02:00+08:00"
+}

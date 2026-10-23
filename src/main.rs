@@ -9,19 +9,22 @@ mod config;
 mod ops;
 
 use clap::Parser;
-use cli::{Cli, Commands};
+use cli::{Cli, Commands, TargetCommands};
+use std::process::ExitCode;
 
-fn main() {
+fn main() -> ExitCode {
     // 解析命令行输入
     let cli = Cli::parse();
 
-    // 【Rust 基础概念：match 模式匹配】
-    // Rust 的 match 非常严格，必须穷尽（Cover）枚举的所有可能情况（分支），
+    // 💡模式匹配 (Match)
+    // Rust 的 match 非常严格，必须穷尽枚举的所有可能情况（分支），
     // 少写一个都会导致编译不通过，从而彻底避免漏掉分支的 Bug。
     match cli.command {
         // 子命令：init
-        Commands::Init { path, name, target } => {
-            commands::init::execute(path, name, target);
+        Commands::Init { path, name } => {
+            if commands::init::execute(path, name).is_err() {
+                return ExitCode::FAILURE;
+            }
         }
 
         // 子命令：status
@@ -31,7 +34,28 @@ fn main() {
 
         // 子命令：doctor
         Commands::Doctor => {
-            commands::doctor::execute();
+            if commands::doctor::execute().is_err() {
+                return ExitCode::FAILURE;
+            }
         }
+
+        // 子命令：target
+        Commands::Target { command } => match command {
+            TargetCommands::Add {
+                path,
+                target_type,
+                name,
+                version,
+            } => {
+                commands::target::handle_target_add(
+                    &path,
+                    &target_type,
+                    name.as_deref(),
+                    version.as_deref(),
+                );
+            }
+        },
     }
+
+    ExitCode::SUCCESS
 }

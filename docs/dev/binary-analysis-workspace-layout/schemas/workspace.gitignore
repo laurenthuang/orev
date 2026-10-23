@@ -1,0 +1,31 @@
+# 原始样本：只索引，不入库
+# 文件名不固定，因此先忽略 00_inbox 内全部，再用 ! 放行三个元数据文件
+# 实测有效：git check-ignore 对样本返回 0，对三个元数据返回 1
+cases/*/*/*/00_inbox/*
+!cases/*/*/*/00_inbox/stage.yaml
+!cases/*/*/*/00_inbox/checksums.sha256
+!cases/*/*/*/00_inbox/provenance.json
+cases/*/*/*/10_unpack/out/filesystem/
+
+# 重型工具项目（含人工批注，走备份不走 git）
+# 注意：gitignore 一行只认一个 pattern，空格分隔不生效 —— 必须分行写
+*.gpr
+*.rep/
+*.i64
+*.bndb
+*.rzdb
+
+# 大体积产物（同理必须分行写）
+cases/*/*/*/40_dynamic/out/trace/
+cases/*/*/*/40_dynamic/out/queue/
+*.pcap
+*.pcapng
+*.dmp
+*.mem
+
+# 外置存储与环境（working/ 走备份；scripts/ 是文本，随 git 正常入库）
+store/
+tools/*/working/
+.cache/
+log/
+state/env.md

@@ -1,0 +1,1 @@
+{"thread_id": "TH2", "question": "httpd 的认证逻辑在哪、是否可绕过", "status": "active", "opened_at": "2026-10-14T14:30:00+08:00", "updated_at": "2026-10-14T15:02:11+08:00", "stages_touched": ["20_static", "30_decompile"], "next_actions": ["跟 0x40a120 的交叉引用", "确认口令是否可被配置覆盖"], "dead_ends": ["符号表已 strip，无法从函数名定位", "UPX 壳段 0x40xxxx 静态脱壳失败"], "claim_refs": ["F-003", "F-004"], "blocked_by": null}
