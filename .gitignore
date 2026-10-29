@@ -1,0 +1,33 @@
+# Rust / Cargo Build Artifacts
+/target/
+/Cargo.lock
+**/*.rs.bk
+*.rs.local
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS Generated Files
+.DS_Store
+
+# Core dumps, logs, and temporary debugging outputs
+*.core
+*.dmp
+*.log
+*.tmp
+
+# Dev Environment
+docs/dev/archive/
+.env
+*.local
+.agents/skills/
+skills-lock.json
+
+# Miscellaneous
+demo_wks/**/*
+*.bak
+*.cache
