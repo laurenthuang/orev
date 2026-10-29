@@ -45,6 +45,15 @@ cargo test --test case case_add_creates_named_shared_cases_and_finds_ancestor_pr
 - Initialization tests need Git. Tool tests set `PATH` and Ghidra paths. They do not need installed analysis tools.
 - Do not add generated `Cargo.lock` to version control.
 
+## Commit messages
+
+Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) titles: `<type>[(scope)][!]: <description>`.
+
+- Types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`, `style`, `revert`, and `agent` for skills and agent instructions (`AGENTS.md`, `.agents/`).
+- Scopes are optional and name a command or module, such as `run`, `case`, or `doctor`.
+- Write the description in the imperative mood and in lowercase, with no trailing period. Keep the title under 72 characters, aiming for 50.
+- Mark breaking CLI or configuration changes with `!` or a `BREAKING CHANGE:` footer.
+
 ## Key conventions
 
 - For command changes, use the [workspace](./docs/user/workspaces.md), [tool-run](./docs/user/tool-runs.md), and [diagnostic](./docs/user/diagnostics.md) guides. Update the related guide. Do not use `docs/dev/archive/` as current contracts.
