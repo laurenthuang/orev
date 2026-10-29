@@ -1,30 +1,19 @@
 # Agent instructions
 
-Keep user instructions in [README.md](./README.md) and [docs/user/](./docs/user/).
-Link to them. Do not copy their content.
+Keep user-facing instructions in [README.md](./README.md) and [docs/user/](./docs/user/).
+Link to those instructions instead of copying them here.
+For command changes, update the relevant [configuration](./docs/user/workspaces.md), [tool-run](./docs/user/tool-runs.md), or [diagnostic](./docs/user/diagnostics.md) guide.
+Treat `docs/dev/archive/` as historical material, not current contracts.
 
 ## Layout and architecture
 
-```text
-Cargo.toml          # Rust package and dependencies
-src/
-  main.rs           # Command dispatch
-  cli.rs            # Clap command definitions
-  ops/              # Case, workspace, and tool-run operations
-    run/            # PTY, redaction, and record integrity
-  config.rs         # TOML schemas and resource roots
-  tool.rs           # Shared discovery and version probes
-tests/              # CLI integration tests and support/
-docs/glossary.md    # Shared terminology
-docs/user/          # User guides
-```
+Use the [glossary](./docs/glossary.md) for case and workspace terminology.
+Use "repository-local" for repository customizations.
+See the [architecture](./docs/dev/architecture.md) for configuration types, module dependencies, and tool recording.
 
-- Keep command dispatch and process exit handling in `src/main.rs`. Put filesystem and execution logic in `src/ops/`.
-- See the [architecture diagrams](./docs/dev/architecture.md) for module dependencies, shared resources, and tool recording.
-- Use the [canonical glossary](./docs/glossary.md) for case and workspace terminology. Use "repository-local" for repository customizations.
-- `RootConfig` separates `Case(CaseConfig)` from `Workspace(WorkspaceConfig)`. `WorkspaceInfo` holds the ordered case registry. Workspace cases use `CaseConfig.workspace_root` and share workspace resources.
-- `src/ops/case.rs` reuses `src/ops/init.rs` for new cases. Keep conversion locks, symbolic link checks, and rollback.
-- `doctor` and `run` share `src/tool.rs`. Keep probe time and output limits. Read Ghidra versions from installation properties. Do not execute its launcher for version detection.
+- Keep command dispatch and process exit handling in [src/main.rs](./src/main.rs). Put filesystem and execution logic in [src/ops/](./src/ops/).
+- Reuse [src/ops/init.rs](./src/ops/init.rs) when adding cases. Preserve conversion locks, symbolic link checks, and rollback.
+- Use [src/tool.rs](./src/tool.rs) for executable discovery and version probes. Keep probe time and output limits. Read Ghidra versions from `Ghidra/application.properties`, not by executing its launcher.
 
 ## Build, test, and lint
 
@@ -35,16 +24,13 @@ cargo build
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
-
-# One integration-test target:
-cargo test --test case
-
-# One exact test:
-cargo test --test case case_add_creates_named_workspace_cases_and_finds_ancestor_workspace -- --exact
 ```
+
+For case-management changes, run `cargo test --test case`.
 
 - Integration tests use `CARGO_BIN_EXE_orev` and [tests/support/mod.rs](./tests/support/mod.rs). Use temporary directories and executable shell fixtures.
 - Initialization tests need Git. Tool tests set `PATH` and Ghidra paths. They do not need installed analysis tools.
+- Use [CLI verification](./.agents/skills/verify-orev/SKILL.md) for real-terminal checks and [redaction verification](./.agents/skills/verify-redaction/SKILL.md) for bounded-exhaustive checks.
 - Do not add generated `Cargo.lock` to version control.
 
 ## Commit messages
@@ -56,15 +42,17 @@ Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) title
 - Write the description in the imperative mood and in lowercase, with no trailing period. Keep the title under 72 characters, aiming for 50.
 - Mark breaking CLI or configuration changes with `!` or a `BREAKING CHANGE:` footer.
 
-## Key conventions
+## Case and workspace changes
 
-- For command changes, use the [workspace](./docs/user/workspaces.md), [tool-run](./docs/user/tool-runs.md), and [diagnostic](./docs/user/diagnostics.md) guides. Update the related guide. Do not use `docs/dev/archive/` as current contracts.
 - Reject unknown TOML fields. Use YAML for structured results and lists for state ledgers. Do not convert old formats automatically.
-- Check configuration before initialization. Keep valid files and links. Sync temporary files in the destination directory. Install them with an operation that cannot replace another entry.
+- Validate existing configuration before creating case resources. Preserve valid files and symbolic links. Synchronize temporary files in the destination directory. Publish files without replacing existing entries.
 - `case add` stops at the nearest configuration, even if invalid. `status` and `doctor` read only the current directory.
-- Resolve symbolic links before storage boundary checks. Require absolute storage directories that exist outside their case root or workspace root. Do not rewrite saved case storage roots.
-- Preserve OS-string argument bytes. Do not insert a shell. Allow lossy conversion only in metadata.
+- Resolve symbolic links before storage boundary checks. Configured external roots must be absolute, already exist, and resolve outside the configuration root that declares them. Do not rewrite saved case storage roots.
+- Keep optional-tool warnings separate from `doctor` configuration failures. The `status` exit code 0 does not prove configuration validity.
+
+## Tool execution changes
+
+- Preserve OS-string argument bytes. Do not insert a shell. Allow lossy conversion of arguments only in metadata.
 - Use directory mode `0700` and record-file mode `0600`. Do not overwrite records or recreate deleted paths. Keep original open handles after record replacement or deletion.
 - Use the effective user identifier (UID), not `USER`, for account lookup. Replace complete username path components with `<user>` before record writes. Keep redaction state across chunks. Leave live output and execution unchanged.
 - Keep metadata completion steps for handled failures and signals. Return tool exit codes, or `128 + signal` for signal termination. Return 1 for record failures, even if the tool succeeds.
-- Keep optional-tool warnings separate from `doctor` configuration failures. The `status` exit code 0 does not prove configuration validity.
