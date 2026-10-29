@@ -1,5 +1,7 @@
 mod integrity;
 mod redact;
+#[cfg(test)]
+mod redact_bounded;
 mod terminal;
 
 use self::redact::{current_username, redact_value};

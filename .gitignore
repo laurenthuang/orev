@@ -24,7 +24,10 @@
 docs/dev/archive/
 .env
 *.local
-.agents/skills/
+# Installed skills stay local; project-local verification skills are tracked.
+.agents/skills/*
+!.agents/skills/verify-orev/
+!.agents/skills/verify-redaction/
 skills-lock.json
 
 # Miscellaneous
