@@ -28,6 +28,46 @@ fn config(config_root: &Path) -> toml::Value {
     toml::from_str(&fs::read_to_string(config_root.join("orev.toml")).unwrap()).unwrap()
 }
 
+fn set_storage(config_root: &Path, roots: &[(&str, &Path)]) {
+    let mut value = config(config_root);
+    value.as_table_mut().unwrap().insert(
+        "storage".into(),
+        toml::Value::Table(
+            roots
+                .iter()
+                .map(|(field, path)| {
+                    (
+                        (*field).to_string(),
+                        toml::Value::String(path.to_str().unwrap().to_string()),
+                    )
+                })
+                .collect(),
+        ),
+    );
+    fs::write(
+        config_root.join("orev.toml"),
+        toml::to_string_pretty(&value).unwrap(),
+    )
+    .unwrap();
+}
+
+fn assert_effective_roots(case_root: &Path, store: &Path, tools: &Path) {
+    let output = run(case_root, &["doctor"]);
+    success(&output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for path in [store, tools] {
+        let expected = fs::canonicalize(path).unwrap();
+        assert!(
+            stdout.contains(&format!("Directory `{}` exists.", expected.display())),
+            "{stdout}"
+        );
+    }
+    assert!(!stdout.contains("is missing."), "{stdout}");
+    for kind in ["kb", "store", "tools"] {
+        assert!(!case_root.join(kind).exists(), "unexpected local {kind}");
+    }
+}
+
 #[test]
 fn legacy_case_associations_are_rejected_without_side_effects() {
     for association in [
@@ -70,12 +110,11 @@ fn assert_workspace_case(workspace_root: &Path, name: &str) {
     let config = config(&case_root);
     assert_eq!(config["case"]["name"].as_str(), Some(name));
     assert_eq!(config["workspace_root"].as_str(), Some("../.."));
+    assert!(
+        config.get("storage").is_none(),
+        "workspace cases must inherit resources without storage snapshots"
+    );
     for kind in ["store", "tools"] {
-        let expected = fs::canonicalize(workspace_root.join(kind)).unwrap();
-        assert_eq!(
-            config["storage"][format!("{kind}_root")].as_str(),
-            expected.to_str(),
-        );
         assert!(!case_root.join(kind).exists());
     }
     assert!(!case_root.join("kb").exists());
@@ -379,10 +418,7 @@ fn case_add_uses_existing_external_storage_and_rejects_missing_roots() {
     .unwrap();
     success(&run(&workspace_root, &["case", "add", "external-case"]));
     let case_root = workspace_root.join("cases/external-case");
-    assert_eq!(
-        config(&case_root)["storage"]["store_root"].as_str(),
-        fs::canonicalize(&external).unwrap().to_str()
-    );
+    assert!(config(&case_root).get("storage").is_none());
     success(&run(&case_root, &["doctor"]));
     assert_eq!(fs::read(external.join("sentinel")).unwrap(), b"preserve");
 
@@ -400,6 +436,441 @@ fn case_add_uses_existing_external_storage_and_rejects_missing_roots() {
     );
     assert!(!workspace_root.join("cases/bad").exists());
     assert!(!missing.exists());
+}
+
+#[test]
+fn workspace_cases_remain_portable_when_the_directory_bundle_moves() {
+    for external in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let bundle = directory.path().join("bundle");
+        let workspace = bundle.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        success(&run(&workspace, &["init", "--workspace"]));
+        if external {
+            for kind in ["store", "tools"] {
+                fs::create_dir(bundle.join(format!("shared-{kind}"))).unwrap();
+                fs::remove_dir(workspace.join(kind)).unwrap();
+            }
+            set_storage(
+                &workspace,
+                &[
+                    ("store_root", Path::new("../shared-store")),
+                    ("tools_root", Path::new("../shared-tools")),
+                ],
+            );
+        }
+        for name in ["one", "two"] {
+            success(&run(&workspace, &["case", "add", name]));
+        }
+        let snapshots: Vec<_> = ["orev.toml", "cases/one/orev.toml", "cases/two/orev.toml"]
+            .into_iter()
+            .map(|path| (path, fs::read(workspace.join(path)).unwrap()))
+            .collect();
+        let moved = directory.path().join("moved");
+        fs::rename(&bundle, &moved).unwrap();
+        let workspace = moved.join("workspace");
+        for name in ["one", "two"] {
+            let case_root = workspace.join("cases").join(name);
+            assert!(config(&case_root).get("storage").is_none());
+            let output = support::orev()
+                .current_dir(directory.path())
+                .arg("init")
+                .arg(&case_root)
+                .output()
+                .unwrap();
+            success(&output);
+            let resource = |kind| {
+                if external {
+                    moved.join(format!("shared-{kind}"))
+                } else {
+                    workspace.join(kind)
+                }
+            };
+            assert_effective_roots(&case_root, &resource("store"), &resource("tools"));
+        }
+        for (path, bytes) in snapshots {
+            assert_eq!(fs::read(workspace.join(path)).unwrap(), bytes);
+        }
+        success(&run(&workspace, &["case", "add", "three"]));
+        assert_cases(&workspace, &["one", "two", "three"]);
+        assert!(
+            config(&workspace.join("cases/three"))
+                .get("storage")
+                .is_none()
+        );
+        assert!(!bundle.exists());
+    }
+}
+
+#[test]
+fn workspace_changes_affect_inheriting_cases_but_preserve_absolute_snapshots() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path().join("workspace");
+    fs::create_dir(&workspace).unwrap();
+    success(&run(&workspace, &["init", "--workspace"]));
+    for name in ["inheriting", "snapshot"] {
+        success(&run(&workspace, &["case", "add", name]));
+    }
+    let inheriting = workspace.join("cases/inheriting");
+    let snapshot = workspace.join("cases/snapshot");
+    set_storage(
+        &snapshot,
+        &[
+            ("store_root", &workspace.join("store")),
+            ("tools_root", &workspace.join("tools")),
+        ],
+    );
+    let content = format!(
+        "# Existing absolute snapshot, preserve byte for byte.\n{}",
+        fs::read_to_string(snapshot.join("orev.toml")).unwrap()
+    );
+    fs::write(snapshot.join("orev.toml"), &content).unwrap();
+    let inherited_content = fs::read(inheriting.join("orev.toml")).unwrap();
+    let new_store = directory.path().join("new-store");
+    let new_tools = directory.path().join("new-tools");
+    fs::create_dir(&new_store).unwrap();
+    fs::create_dir(&new_tools).unwrap();
+    set_storage(
+        &workspace,
+        &[
+            ("store_root", Path::new("../new-store")),
+            ("tools_root", Path::new("../new-tools")),
+        ],
+    );
+    success(&run(&inheriting, &["init"]));
+    success(&run(&snapshot, &["init"]));
+    assert_effective_roots(&inheriting, &new_store, &new_tools);
+    assert_effective_roots(
+        &snapshot,
+        &workspace.join("store"),
+        &workspace.join("tools"),
+    );
+    success(&run(&snapshot, &["case", "add", "later"]));
+    assert_effective_roots(&workspace.join("cases/later"), &new_store, &new_tools);
+    assert_eq!(
+        fs::read(inheriting.join("orev.toml")).unwrap(),
+        inherited_content
+    );
+    assert_eq!(
+        fs::read_to_string(snapshot.join("orev.toml")).unwrap(),
+        content
+    );
+
+    set_storage(
+        &workspace,
+        &[
+            ("store_root", Path::new("../missing-store")),
+            ("tools_root", Path::new("../missing-tools")),
+        ],
+    );
+    success(&run(&snapshot, &["init"]));
+    assert_effective_roots(
+        &snapshot,
+        &workspace.join("store"),
+        &workspace.join("tools"),
+    );
+    assert_eq!(run(&inheriting, &["init"]).status.code(), Some(1));
+    assert_eq!(
+        fs::read_to_string(snapshot.join("orev.toml")).unwrap(),
+        content
+    );
+    assert_eq!(
+        fs::read(inheriting.join("orev.toml")).unwrap(),
+        inherited_content
+    );
+}
+
+#[test]
+fn case_overrides_resolve_each_field_against_its_declaring_directory() {
+    for (kind, configured_workspace) in ["store", "tools"]
+        .into_iter()
+        .flat_map(|kind| [false, true].map(move |configured| (kind, configured)))
+    {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = directory.path().join("workspace");
+        let elsewhere = directory.path().join("elsewhere");
+        fs::create_dir(&workspace).unwrap();
+        fs::create_dir(&elsewhere).unwrap();
+        success(&run(&workspace, &["init", "--workspace"]));
+        for root in ["workspace-store", "workspace-tools"] {
+            fs::create_dir(directory.path().join(root)).unwrap();
+            fs::create_dir(workspace.join("cases").join(root)).unwrap();
+            fs::create_dir(elsewhere.join(root)).unwrap();
+        }
+        if configured_workspace {
+            set_storage(
+                &workspace,
+                &[
+                    ("store_root", Path::new("../workspace-store")),
+                    ("tools_root", Path::new("../workspace-tools")),
+                ],
+            );
+        }
+        success(&run(&workspace, &["case", "add", "analysis"]));
+        let case_root = workspace.join("cases/analysis");
+        let field = format!("{kind}_root");
+        let relative = format!("../workspace-{kind}");
+        set_storage(&case_root, &[(&field, Path::new(&relative))]);
+        let bytes = fs::read(case_root.join("orev.toml")).unwrap();
+        let init = || {
+            let output = support::orev()
+                .current_dir(&elsewhere)
+                .arg("init")
+                .arg(&case_root)
+                .output()
+                .unwrap();
+            success(&output);
+        };
+        let store = if kind == "store" {
+            workspace.join("cases/workspace-store")
+        } else if !configured_workspace {
+            workspace.join("store")
+        } else {
+            directory.path().join("workspace-store")
+        };
+        let tools = if kind == "tools" {
+            workspace.join("cases/workspace-tools")
+        } else if !configured_workspace {
+            workspace.join("tools")
+        } else {
+            directory.path().join("workspace-tools")
+        };
+        init();
+        assert_effective_roots(&case_root, &store, &tools);
+        let mut value = config(&workspace);
+        value["storage"]
+            .as_table_mut()
+            .unwrap()
+            .insert(field, toml::Value::String("kb".into()));
+        fs::write(
+            workspace.join("orev.toml"),
+            toml::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+        init();
+        assert_effective_roots(&case_root, &store, &tools);
+        assert_eq!(fs::read(case_root.join("orev.toml")).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn associated_cases_reject_missing_or_invalid_workspace_configs_without_mutation() {
+    for content in [
+        None,
+        Some("[workspace\n"),
+        Some("[case]\nname = \"not-workspace\"\nversion = \"0.1.0\"\n"),
+        Some("[workspace]\ncases = []\nunknown = true\n"),
+        Some("project_root = \"..\"\n[workspace]\ncases = []\n"),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = directory.path().join("workspace");
+        let case_root = workspace.join("cases/analysis");
+        fs::create_dir_all(&case_root).unwrap();
+        if let Some(content) = content {
+            fs::write(workspace.join("orev.toml"), content).unwrap();
+        }
+        let external = toml::Value::String(directory.path().to_str().unwrap().to_string());
+        let case = format!(
+            "workspace_root = \"../..\"\n[case]\nname = \"analysis\"\nversion = \"0.1.0\"\n\
+             [storage]\nstore_root = {external}\ntools_root = {external}\n"
+        );
+        fs::write(case_root.join("orev.toml"), &case).unwrap();
+        fs::write(case_root.join("evidence"), b"preserve").unwrap();
+        for command in ["init", "doctor"] {
+            let output = run(&case_root, &[command]);
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains("workspace configuration"), "{stderr}");
+            assert!(
+                stderr.contains(&workspace.join("orev.toml").display().to_string()),
+                "{stderr}"
+            );
+            assert_eq!(
+                fs::read_to_string(case_root.join("orev.toml")).unwrap(),
+                case
+            );
+            assert_eq!(fs::read(case_root.join("evidence")).unwrap(), b"preserve");
+            assert_eq!(fs::read_dir(&case_root).unwrap().count(), 2);
+            assert!(!workspace.join("kb").exists());
+            assert!(!workspace.join("store").exists());
+            assert!(!workspace.join("tools").exists());
+        }
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    fs::write(
+        directory.path().join("orev.toml"),
+        "workspace_root = \"missing\"\n[case]\nname = \"case\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    for command in ["init", "doctor"] {
+        let output = run(directory.path(), &[command]);
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Failed to resolve workspace_root")
+        );
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+}
+
+#[test]
+fn inherited_resources_must_exist_and_are_not_recreated_by_case_commands() {
+    for kind in ["kb", "store", "tools"] {
+        let workspace = tempfile::tempdir().unwrap();
+        success(&run(workspace.path(), &["init", "--workspace"]));
+        success(&run(workspace.path(), &["case", "add", "analysis"]));
+        let case_root = workspace.path().join("cases/analysis");
+        let case_bytes = fs::read(case_root.join("orev.toml")).unwrap();
+        let workspace_bytes = fs::read(workspace.path().join("orev.toml")).unwrap();
+        fs::remove_dir_all(workspace.path().join(kind)).unwrap();
+        for (root, args) in [
+            (case_root.as_path(), &["init"][..]),
+            (case_root.as_path(), &["doctor"][..]),
+            (workspace.path(), &["case", "add", "new"][..]),
+        ] {
+            let output = run(root, args);
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let field = if kind == "kb" {
+                "workspace knowledge base".to_string()
+            } else {
+                format!("storage.{kind}_root")
+            };
+            assert!(stderr.contains(&field), "{stderr}");
+            assert!(!workspace.path().join(kind).exists());
+            for local in ["kb", "store", "tools"] {
+                assert!(!case_root.join(local).exists());
+            }
+            assert_eq!(fs::read(case_root.join("orev.toml")).unwrap(), case_bytes);
+            assert_eq!(
+                fs::read(workspace.path().join("orev.toml")).unwrap(),
+                workspace_bytes
+            );
+            assert!(!workspace.path().join("cases/new").exists());
+            assert!(!workspace.path().join(".orev-case-add.lock").exists());
+        }
+    }
+}
+
+#[test]
+fn conversion_promotes_relative_storage_to_workspace_without_changing_its_base() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path().join("original");
+    fs::create_dir(&workspace).unwrap();
+    for kind in ["store", "tools"] {
+        let root = directory.path().join(format!("external-{kind}"));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("sentinel"), kind).unwrap();
+    }
+    fs::write(
+        workspace.join("orev.toml"),
+        "[case]\nname = \"original\"\nversion = \"0.1.0\"\n\
+         [storage]\nstore_root = \"../external-store\"\ntools_root = \"../external-tools\"\n",
+    )
+    .unwrap();
+    success(&run(&workspace, &["init"]));
+    fs::write(workspace.join("notes"), b"analyst notes").unwrap();
+    success(&run(&workspace, &["case", "add", "second"]));
+    let value = config(&workspace);
+    assert_eq!(
+        value["storage"]["store_root"].as_str(),
+        Some("../external-store")
+    );
+    assert_eq!(
+        value["storage"]["tools_root"].as_str(),
+        Some("../external-tools")
+    );
+    for name in ["original", "second"] {
+        let case_root = workspace.join("cases").join(name);
+        assert!(config(&case_root).get("storage").is_none());
+        success(&run(&case_root, &["init"]));
+        assert_effective_roots(
+            &case_root,
+            &directory.path().join("external-store"),
+            &directory.path().join("external-tools"),
+        );
+    }
+    assert_eq!(
+        fs::read(workspace.join("cases/original/notes")).unwrap(),
+        b"analyst notes"
+    );
+    for kind in ["store", "tools"] {
+        assert_eq!(
+            fs::read(directory.path().join(format!("external-{kind}/sentinel"))).unwrap(),
+            kind.as_bytes()
+        );
+        assert!(!workspace.join(kind).exists());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn inherited_relative_storage_preserves_physical_workspace_containment_checks() {
+    use std::os::unix::fs::symlink;
+
+    for (kind, outside) in ["store", "tools"]
+        .into_iter()
+        .flat_map(|kind| [false, true].map(move |outside| (kind, outside)))
+    {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = directory.path().join("workspace");
+        let external = directory.path().join("external");
+        fs::create_dir(&workspace).unwrap();
+        fs::create_dir(&external).unwrap();
+        success(&run(&workspace, &["init", "--workspace"]));
+        success(&run(&workspace, &["case", "add", "analysis"]));
+        let case_root = workspace.join("cases/analysis");
+        if outside {
+            symlink(&external, workspace.join("alias")).unwrap();
+        } else {
+            symlink(workspace.join("kb"), directory.path().join("alias")).unwrap();
+        }
+        let relative = if outside { "alias" } else { "../alias" };
+        set_storage(
+            &workspace,
+            &[(&format!("{kind}_root"), Path::new(relative))],
+        );
+        let workspace_bytes = fs::read(workspace.join("orev.toml")).unwrap();
+        let case_bytes = fs::read(case_root.join("orev.toml")).unwrap();
+        for (root, args) in [
+            (case_root.as_path(), &["init"][..]),
+            (case_root.as_path(), &["doctor"][..]),
+            (workspace.as_path(), &["doctor"][..]),
+        ] {
+            let output = run(root, args);
+            if outside {
+                success(&output);
+            } else {
+                assert_eq!(output.status.code(), Some(1), "{output:?}");
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert!(
+                    stderr.contains(&format!("Failed to resolve storage.{kind}_root")),
+                    "{stderr}"
+                );
+                assert!(
+                    stderr.contains("outside the configuration root"),
+                    "{stderr}"
+                );
+            }
+            assert_eq!(fs::read(case_root.join("orev.toml")).unwrap(), case_bytes);
+            assert_eq!(
+                fs::read(workspace.join("orev.toml")).unwrap(),
+                workspace_bytes
+            );
+        }
+        let output = run(&workspace, &["case", "add", "new"]);
+        if outside {
+            success(&output);
+        } else {
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            assert!(!workspace.join("cases/new").exists());
+            assert_eq!(
+                fs::read(workspace.join("orev.toml")).unwrap(),
+                workspace_bytes
+            );
+        }
+        assert_eq!(fs::read(case_root.join("orev.toml")).unwrap(), case_bytes);
+    }
 }
 
 #[test]

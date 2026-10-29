@@ -76,6 +76,7 @@ orev case add router-audit
 cd ./cases/router-audit
 ```
 
+Cases inherit shared resources through `workspace_root` without copying storage paths into each case configuration.
 See [Workspaces and configuration](docs/user/workspaces.md) before you convert an existing standalone case.
 
 ### Record a tool run

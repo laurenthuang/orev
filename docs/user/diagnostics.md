@@ -62,6 +62,9 @@ orev doctor
 Doctor reports the operating system and CPU architecture.
 It reads and validates the case or workspace configuration.
 It resolves storage roots and the shared knowledge-base path.
+For a workspace case, it also validates the associated workspace configuration schema.
+Explicit case storage fields override inherited workspace settings.
+Relative paths use the directory of the declaring configuration.
 For a case, it checks these directories:
 
 - The case's local or shared `kb/`, `store/`, and `tools/` roots.
@@ -90,10 +93,11 @@ It does not start Ghidra analysis or execute its launcher.
 
 ### Warnings and errors
 
-Missing expected directories, incorrect directory types, and optional tool problems produce warnings.
+At local default paths, missing directories and incorrect directory types produce warnings.
+Optional tool problems also produce warnings.
 These warnings alone do not cause a nonzero exit status.
 Configuration read or parse failures, invalid storage roots, and filesystem inspection failures return errors.
-A shared knowledge-base path that cannot resolve to a directory also returns an error.
+A shared knowledge-base or inherited storage root that cannot resolve to a directory also returns an error.
 
 A completed doctor command does not prove that every tool is available or that an analysis will succeed.
 Read its diagnostics, not only its exit code.

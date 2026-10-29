@@ -81,17 +81,24 @@ flowchart LR
     workspace --> b["cases/firmware/<br/>Case root with orev.toml, CASE.md, scripts/, state/, .orev/"]
     a -. "workspace_root = ../.." .-> workspace
     b -. "workspace_root = ../.." .-> workspace
-    a -. "Saved absolute storage roots" .-> storage
-    b -. "Saved absolute storage roots" .-> storage
+    a -. "Inherits unset storage fields" .-> storage
+    b -. "Inherits unset storage fields" .-> storage
 ```
 
 A standalone case has its own `kb`, `store`, and `tools` defaults.
-A workspace case resolves `kb` through `workspace_root`.
-Its saved storage roots remain fixed even if the workspace's storage configuration changes.
-Configured storage roots must already exist outside the case root or workspace root after symbolic link resolution.
+A workspace case resolves shared resources through `workspace_root`.
+Each explicit case storage field overrides the workspace setting or default for that field.
+Unset fields follow workspace configuration changes without rewriting case files.
+Saved overrides and resolved runtime paths are separate.
+Relative overrides use the declaring configuration's directory as their base, not the current working directory.
+Configured storage roots must already exist outside that configuration root after symbolic link resolution.
+Absolute overrides remain supported.
 
 `case add` finds the nearest configuration, then locks the workspace before it validates and changes the registry.
 For a standalone case, it stages the conversion and the new case together.
+The staged initializer uses the proposed workspace context while the root configuration still describes the standalone case.
+Conversion keeps storage settings in the workspace configuration, preserving their relative path base.
+Both cases inherit those settings rather than saving duplicate paths.
 It publishes the updated registry after moving the cases into place.
 Handled failures undo recorded moves in reverse order.
 An incomplete rollback retains recovery data and reports its location.

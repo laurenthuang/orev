@@ -63,40 +63,26 @@ pub fn run_doctor() -> io::Result<()> {
 
     println!("[✓] `orev.toml` configuration loaded and validated.");
 
-    let store_root = match config.storage().resolve_store_root(&config_root) {
-        Ok(path) => path,
-        Err(e) => {
-            eprintln!("Error: Failed to resolve storage.store_root: {}", e);
-            return Err(e);
-        }
-    };
-    let tools_root = match config.storage().resolve_tools_root(&config_root) {
-        Ok(path) => path,
-        Err(e) => {
-            eprintln!("Error: Failed to resolve storage.tools_root: {}", e);
-            return Err(e);
-        }
-    };
+    let resources = config
+        .resolve_resources(&config_root)
+        .inspect_err(|error| eprintln!("Error: {error}"))?;
 
     // 2. 检查案件或工作区目录
     let dirs = match &config {
-        RootConfig::Case(config) => {
-            let kb_root = config.resolve_kb_root(&config_root).inspect_err(|e| {
-                eprintln!("Error: Failed to resolve workspace knowledge base: {}", e);
-            })?;
+        RootConfig::Case(_) => {
             vec![
-                kb_root,
-                store_root,
-                tools_root,
+                resources.kb.path().to_path_buf(),
+                resources.store.path().to_path_buf(),
+                resources.tools.path().to_path_buf(),
                 config_root.join("scripts"),
                 config_root.join("state"),
                 config_root.join(".orev"),
             ]
         }
         RootConfig::Workspace(_) => vec![
-            config_root.join("kb"),
-            store_root,
-            tools_root,
+            resources.kb.path().to_path_buf(),
+            resources.store.path().to_path_buf(),
+            resources.tools.path().to_path_buf(),
             config_root.join("cases"),
         ],
     };

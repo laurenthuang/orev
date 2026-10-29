@@ -881,9 +881,9 @@ fn init_generates_only_case_configuration_and_layout() {
         toml::from_str(&content).expect("generated config must be valid TOML");
 
     let fields = config.as_table().expect("config must be a table");
-    assert_eq!(fields.len(), 2);
+    assert_eq!(fields.len(), 1);
     assert!(fields.contains_key("case"));
-    assert!(fields.contains_key("storage"));
+    assert!(!fields.contains_key("storage"));
 
     let mut entries = fs::read_dir(case_root)
         .unwrap()
@@ -1021,6 +1021,164 @@ fn init_and_doctor_use_existing_external_storage_roots() {
 }
 
 #[test]
+fn relative_standalone_storage_uses_the_config_directory_not_the_invocation_directory() {
+    for kind in ["store", "tools"] {
+        let directory = tempfile::tempdir().unwrap();
+        let case_root = directory.path().join("case");
+        let elsewhere = directory.path().join("elsewhere");
+        let external = directory.path().join("external");
+        for root in [&case_root, &elsewhere, &external] {
+            fs::create_dir(root).unwrap();
+        }
+        write_config_with_storage_root(
+            &case_root,
+            &format!("{kind}_root"),
+            Path::new("../external"),
+        );
+        let bytes = fs::read(case_root.join("orev.toml")).unwrap();
+        let output = support::orev()
+            .current_dir(&elsewhere)
+            .arg("init")
+            .arg("../case")
+            .output()
+            .unwrap();
+        assert_success(&output);
+        assert!(!case_root.join(kind).exists());
+        let other = if kind == "store" { "tools" } else { "store" };
+        assert!(case_root.join(other).is_dir());
+        let output = support::orev()
+            .current_dir(&case_root)
+            .arg("doctor")
+            .env("PATH", "")
+            .env_remove("GHIDRA_INSTALL_DIR")
+            .output()
+            .unwrap();
+        assert_success(&output);
+        let expected = fs::canonicalize(external).unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(&format!("Directory `{}` exists.", expected.display())),
+            "{stdout}"
+        );
+        assert_eq!(fs::read(case_root.join("orev.toml")).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn workspace_reinit_uses_declared_relative_storage_without_creating_local_fallbacks() {
+    for valid in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = directory.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        if valid {
+            for kind in ["store", "tools"] {
+                let external = directory.path().join(format!("external-{kind}"));
+                fs::create_dir(&external).unwrap();
+                fs::write(external.join("sentinel"), b"preserve").unwrap();
+            }
+        }
+        let content = "[workspace]\ncases = []\n[storage]\n\
+            store_root = \"../external-store\"\ntools_root = \"../external-tools\"\n";
+        fs::write(workspace.join("orev.toml"), content).unwrap();
+        let output = support::orev()
+            .current_dir(directory.path())
+            .args(["init", "--workspace", "workspace"])
+            .output()
+            .unwrap();
+        if valid {
+            assert_success(&output);
+            assert!(workspace.join("cases").is_dir());
+            assert!(workspace.join("kb").is_dir());
+            let doctor = support::orev()
+                .current_dir(&workspace)
+                .arg("doctor")
+                .env("PATH", "")
+                .env_remove("GHIDRA_INSTALL_DIR")
+                .output()
+                .unwrap();
+            assert_success(&doctor);
+            let stdout = String::from_utf8_lossy(&doctor.stdout);
+            assert!(!stdout.contains("is missing."), "{stdout}");
+            for kind in ["store", "tools"] {
+                let external = directory.path().join(format!("external-{kind}"));
+                assert!(stdout.contains(&external.display().to_string()), "{stdout}");
+                assert_eq!(fs::read(external.join("sentinel")).unwrap(), b"preserve");
+            }
+        } else {
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("Failed to resolve storage.store_root")
+            );
+            assert_eq!(fs::read_dir(&workspace).unwrap().count(), 1);
+        }
+        assert_eq!(
+            fs::read_to_string(workspace.join("orev.toml")).unwrap(),
+            content
+        );
+        for kind in ["store", "tools"] {
+            assert!(!workspace.join(kind).exists());
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn relative_storage_symlinks_are_validated_by_their_physical_destination() {
+    use std::os::unix::fs::symlink;
+
+    for (kind, outside) in ["store", "tools"]
+        .into_iter()
+        .flat_map(|kind| [false, true].map(move |outside| (kind, outside)))
+    {
+        let directory = tempfile::tempdir().unwrap();
+        let case_root = directory.path().join("case");
+        let inside = case_root.join("inside");
+        let external = directory.path().join("external");
+        fs::create_dir_all(&inside).unwrap();
+        fs::create_dir(&external).unwrap();
+        let target = if outside { &external } else { &inside };
+        symlink(target, case_root.join("alias")).unwrap();
+        write_config_with_storage_root(&case_root, &format!("{kind}_root"), Path::new("alias"));
+        let bytes = fs::read(case_root.join("orev.toml")).unwrap();
+        let original_entries = fs::read_dir(&case_root).unwrap().count();
+        for command in ["init", "doctor"] {
+            let output = support::orev()
+                .current_dir(&case_root)
+                .arg(command)
+                .env("PATH", "")
+                .env_remove("GHIDRA_INSTALL_DIR")
+                .output()
+                .unwrap();
+            if outside {
+                assert_success(&output);
+                assert!(!case_root.join(kind).exists());
+                if command == "doctor" {
+                    let expected = fs::canonicalize(&external).unwrap();
+                    assert!(
+                        String::from_utf8_lossy(&output.stdout)
+                            .contains(&format!("Directory `{}` exists.", expected.display()))
+                    );
+                }
+            } else {
+                assert_eq!(output.status.code(), Some(1), "{output:?}");
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert!(
+                    stderr.contains(&format!("Failed to resolve storage.{kind}_root")),
+                    "{stderr}"
+                );
+                assert!(
+                    stderr.contains("outside the configuration root"),
+                    "{stderr}"
+                );
+                assert_eq!(fs::read_dir(&case_root).unwrap().count(), original_entries);
+            }
+            assert_eq!(fs::read(case_root.join("orev.toml")).unwrap(), bytes);
+        }
+    }
+}
+
+#[test]
 fn init_rejects_invalid_external_storage_roots_before_creating_resources() {
     for kind in ["store", "tools"] {
         let temp = tempfile::tempdir().expect("failed to create temporary directory");
@@ -1040,6 +1198,8 @@ fn init_rejects_invalid_external_storage_roots_before_creating_resources() {
             missing.clone(),
             regular_file.clone(),
             case_root.clone(),
+            PathBuf::from("."),
+            PathBuf::from("inside"),
             inside_case,
         ] {
             write_config_with_storage_root(&case_root, &field, &root);

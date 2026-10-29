@@ -103,6 +103,8 @@ cases = []
 This command does not create cases, state ledgers, analysis-tool databases, or a Git repository.
 The `corpus/` directory is optional.
 A repeated command preserves the registry and existing files.
+Reinitialization validates configured storage before creating workspace resources.
+It does not create unused local storage defaults.
 `init --workspace` does not convert an existing standalone case.
 Use `case add` for conversion.
 
@@ -125,12 +127,12 @@ A workspace registers case names in `[workspace].cases`.
 Inside a workspace case, `workspace_root` identifies the workspace that receives the new sibling case.
 
 New workspace cases use the same initialization engine as standalone cases.
-They share the workspace's knowledge base.
-Their configurations record the resolved storage roots.
+They inherit the workspace's knowledge base and storage.
+Their configurations record the workspace association, not copies of shared storage paths.
 They do not create local `kb/`, `store/`, or `tools/` directories.
 
-Storage locations are fixed at case creation.
-A later change to workspace storage settings does not rewrite existing case settings.
+Workspace storage changes affect cases that inherit those settings.
+Explicit case storage overrides take precedence and remain unchanged.
 Reinitialization and doctor use the case's shared layout.
 Ordinary `orev init <path>` still creates a standalone case.
 
@@ -172,7 +174,9 @@ These resources stay at the workspace root:
 Other files move with the original case.
 They include unknown notes, attachments, and the original README and ignore rules.
 Orev creates new workspace README and ignore files at the workspace root.
-It updates the original case configuration with the workspace association and storage roots.
+It keeps the original storage settings in the workspace configuration.
+Their relative paths keep the same base directory.
+The moved case gains the workspace association and inherits storage, just like the new case.
 Workspace ignore rules cover temporary state in nested cases and shared tool working data.
 
 ### Links, locking, and recovery
@@ -219,22 +223,67 @@ workspace_root = "../.."
 name = "router-audit"
 version = "0.1.0"
 investigators = []
-
-[storage]
-store_root = "/srv/analysis-workspace/store"
-tools_root = "/srv/analysis-workspace/tools"
 ```
 
-The storage values in this example are the resolved workspace defaults.
-If the workspace uses external storage, new cases save those resolved roots instead.
+### Storage inheritance and overrides
 
 Without `[storage]`, a standalone case uses local `store/` and `tools/` directories.
-Optional `storage.store_root` and `storage.tools_root` values must identify existing absolute directories outside the case root.
-Orev resolves symbolic links before it checks this boundary.
-It does not create external roots, move data to them, or create links to them.
+A workspace case resolves each storage field independently:
 
-Workspace configurations accept the same storage fields.
-Their external roots must be outside the workspace root.
+1. Use the case's explicit `storage.store_root` or `storage.tools_root`, if present.
+2. Otherwise, use the associated workspace's setting.
+3. If the workspace has no setting for that field, use its local `store/` or `tools/` default.
+
+The associated workspace configuration must exist and pass schema validation.
+Orev resolves workspace storage paths only for fields the case inherits.
+Case initialization does not create missing workspace storage or fall back to case-local storage.
+
+Relative storage paths resolve from the directory containing the configuration that declares them, not from the command's current directory.
+For example, the workspace configuration can use sibling directories:
+
+```toml
+[workspace]
+cases = ["router-audit"]
+
+[storage]
+store_root = "../shared-store"
+tools_root = "../shared-tools"
+```
+
+In `/srv/analysis-workspace/orev.toml`, these paths identify `/srv/shared-store` and `/srv/shared-tools`.
+Cases inherit these paths from the workspace without saving them again.
+
+To override only one case's tools, add this block to its configuration:
+
+```toml
+[storage]
+tools_root = "../../case-tools"
+```
+
+In `/srv/analysis-workspace/cases/router-audit/orev.toml`, this path identifies `/srv/analysis-workspace/case-tools`.
+The case still inherits `store_root`.
+
+Create configured storage directories before using them.
+They must resolve outside the case root or workspace root that declares the override.
+Orev resolves symbolic links before checking this boundary.
+It does not create configured roots, move data to them, or create links to them.
+Absolute paths remain supported for deliberately external storage.
+
+Moving a workspace preserves its local defaults and relative case associations.
+Relative overrides keep working if their directories retain the same relative layout.
+Absolute overrides keep their original destinations.
+
+### Let existing cases inherit workspace storage
+
+Earlier versions saved absolute workspace storage paths in each case.
+Those values remain explicit case overrides after upgrading.
+Orev does not remove or rewrite them.
+
+Check the workspace's current storage settings before opting in to inheritance.
+Remove `store_root`, `tools_root`, or both from the case's `[storage]` table to inherit those fields.
+You can remove the table if it is empty.
+This changes path selection only.
+It does not move storage data.
 
 ### Migrate the workspace association manually
 

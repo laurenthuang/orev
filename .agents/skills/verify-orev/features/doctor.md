@@ -1,6 +1,6 @@
 # Doctor
 
-`orev doctor` reports the OS and CPU, validates the configuration in the current directory, and checks the expected directories. It then probes Java, `objdump`, `readelf`, `strings`, and Ghidra. Missing directories and tools are `[!]` warnings. Configuration and storage problems are errors.
+`orev doctor` reports the OS and CPU, validates the configuration in the current directory, and checks the expected directories. It then probes Java, `objdump`, `readelf`, `strings`, and Ghidra. Missing local directories and tools are `[!]` warnings. Invalid configured or inherited storage roots are errors.
 
 ## Sub-features
 
@@ -24,6 +24,7 @@ Preconditions:
 
 - **Case.** Run `$S send "$ID" doctor-case-01 'cd /tmp/orev-verify-'"$ID"'/wks/cases/router-audit && orev doctor'`. You see `[✓] \`orev.toml\` configuration loaded and validated.`, `[✓]` lines for the workspace knowledge base at `wks/kb`, `wks/store`, `wks/tools`, and the case's `scripts`, `state`, and `.orev`, then `[✓]` tool lines with paths, and `Doctor check completed.` with `EXIT=0`.
 - **Missing dir warns.** Run `$S send "$ID" doctor-missing-01 'rmdir scripts && orev doctor; mkdir scripts'`. A `[!]` line names `scripts`, and `EXIT` is still 0 (the trailing `mkdir` restores it; check the doctor line, not `EXIT`).
+- **Missing inherited storage fails.** Run `$S send "$ID" doctor-inherit-01 'mv ../../store ../../store.saved && orev doctor'`. Doctor reports a storage error with `EXIT=1` and does not recreate `store/`. Restore it with `$S send "$ID" doctor-inherit-02 'mv ../../store.saved ../../store'`. Run this only in the scratch workspace.
 - **Bad config fails.** Run `$S send "$ID" doctor-bad-01 'cp orev.toml /tmp/orev-verify-'"$ID"'/home/ok.toml && echo "bogus = 1" >> orev.toml && orev doctor'`. You see a configuration error and `EXIT=1`. Restore it with `$S send "$ID" doctor-bad-02 'cp /tmp/orev-verify-'"$ID"'/home/ok.toml orev.toml'`.
 - **Explicit Ghidra path.** Run `$S send "$ID" doctor-ghidra-01 'GHIDRA_INSTALL_DIR=/nonexistent orev doctor | grep Ghidra'`. You see ``[!] Ghidra: executable `/nonexistent/support/analyzeHeadless` not found or not executable``.
 - **Fake Ghidra layout.** Run `$S send "$ID" doctor-ghidra-02 'G=/tmp/orev-verify-'"$ID"'/home/ghidra; mkdir -p $G/support $G/Ghidra && printf "#!/bin/sh\nexit 99\n" > $G/support/analyzeHeadless && chmod +x $G/support/analyzeHeadless && echo application.version=11.9 > $G/Ghidra/application.properties && GHIDRA_INSTALL_DIR=$G orev doctor | grep Ghidra'`. The Ghidra line shows version `11.9` without running the launcher (the launcher would exit 99). Report this as a fake install.

@@ -15,7 +15,8 @@ Command usage is documented in [Workspaces and configuration](../user/workspaces
 - Reject unknown TOML fields. Use YAML for structured results and lists for state ledgers. Do not convert old formats automatically.
 - Validate existing configuration before creating case resources. Preserve valid files and symbolic links. Synchronize temporary files in the destination directory. Publish files without replacing existing entries.
 - `case add` stops at the nearest configuration, even if invalid. `status` and `doctor` read only the current directory.
-- Resolve symbolic links before storage boundary checks. Configured external roots must be absolute, already exist, and resolve outside the configuration root that declares them. Do not rewrite saved case storage roots.
+- Resolve relative storage overrides from the declaring configuration root. Configured roots must already exist and resolve outside that root after symbolic link resolution. Absolute overrides remain supported. Do not silently rewrite saved case overrides.
+- Workspace cases inherit unset storage fields. Do not serialize inherited roots into case configurations.
 - Keep optional-tool warnings separate from `doctor` configuration failures. The `status` exit code 0 does not prove configuration validity.
 
 ## Tool execution

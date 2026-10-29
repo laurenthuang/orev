@@ -1,5 +1,5 @@
 // src/ops/init.rs
-use crate::config::{CaseConfig, WorkspaceConfig};
+use crate::config::{CaseConfig, ResourceRoot, WorkspaceConfig, WorkspaceContext};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -50,11 +50,11 @@ pub fn run_workspace_init(path: Option<String>) -> io::Result<()> {
 
     let config_path = workspace_root.join("orev.toml");
     let config_exists = existing_regular_file(&config_path)?;
-    if config_exists {
+    let config = if config_exists {
         let content = fs::read_to_string(&config_path).inspect_err(|e| {
             eprintln!("Error: Failed to read `{}`: {}", config_path.display(), e);
         })?;
-        let _: WorkspaceConfig = toml::from_str(&content).map_err(|e| {
+        toml::from_str::<WorkspaceConfig>(&content).map_err(|e| {
             let error = io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
@@ -64,8 +64,14 @@ pub fn run_workspace_init(path: Option<String>) -> io::Result<()> {
             );
             eprintln!("Error: {}", error);
             error
-        })?;
-    }
+        })?
+    } else {
+        WorkspaceConfig::default()
+    };
+    let resources = config_exists
+        .then(|| config.resolve_resources(&workspace_root))
+        .transpose()
+        .inspect_err(|error| eprintln!("Error: {error}"))?;
     {
         let marker_path = workspace_root.join("CASE.md");
         match fs::symlink_metadata(&marker_path) {
@@ -95,16 +101,17 @@ pub fn run_workspace_init(path: Option<String>) -> io::Result<()> {
     println!("Initializing workspace...");
     println!("Workspace Root: {}", workspace_root.display());
     ensure_directory(&workspace_root)?;
-    for directory in [
-        "cases",
-        "kb/techniques",
-        "kb/signatures",
-        "kb/pitfalls",
-        "store",
-        "tools",
-    ] {
+    for directory in ["cases", "kb/techniques", "kb/signatures", "kb/pitfalls"] {
         ensure_directory(&workspace_root.join(directory))?;
     }
+    let resources = match resources {
+        Some(resources) => resources,
+        None => config
+            .resolve_resources(&workspace_root)
+            .inspect_err(|error| eprintln!("Error: {error}"))?,
+    };
+    ensure_resource(&resources.store)?;
+    ensure_resource(&resources.tools)?;
 
     if !config_exists {
         let content = toml::to_string_pretty(&WorkspaceConfig::default())
@@ -167,12 +174,16 @@ pub fn run_init(path: Option<String>) -> io::Result<()> {
         .unwrap_or("binary_case")
         .to_string();
 
-    initialize_case(&case_root, CaseConfig::new_case(case_name))?;
+    initialize_case(&case_root, CaseConfig::new_case(case_name), None)?;
     println!("\nSuccess! Analysis case is ready.");
     Ok(())
 }
 
-pub(super) fn initialize_case(case_root: &Path, initial: CaseConfig) -> io::Result<()> {
+pub(super) fn initialize_case(
+    case_root: &Path,
+    initial: CaseConfig,
+    workspace: Option<WorkspaceContext<'_>>,
+) -> io::Result<()> {
     println!("Initializing analysis case...");
     println!("Case Root: {}", case_root.display());
 
@@ -218,26 +229,12 @@ pub(super) fn initialize_case(case_root: &Path, initial: CaseConfig) -> io::Resu
 
     println!("Case Name: {}", config.case.name);
 
-    let store_root = match config.storage.resolve_store_root(case_root) {
-        Ok(path) => path,
-        Err(e) => {
-            eprintln!("Error: Failed to resolve storage.store_root: {}", e);
-            return Err(e);
-        }
-    };
-    let tools_root = match config.storage.resolve_tools_root(case_root) {
-        Ok(path) => path,
-        Err(e) => {
-            eprintln!("Error: Failed to resolve storage.tools_root: {}", e);
-            return Err(e);
-        }
-    };
+    let resources = config
+        .resolve_resources(case_root, workspace)
+        .inspect_err(|error| eprintln!("Error: {error}"))?;
 
     // 4. 创建标准案件子目录
-    let kb_root = config.resolve_kb_root(case_root).inspect_err(|e| {
-        eprintln!("Error: Failed to resolve workspace knowledge base: {}", e);
-    })?;
-    if config.workspace_root.is_none() {
+    if let ResourceRoot::Local(kb_root) = &resources.kb {
         for child in ["techniques", "signatures", "pitfalls"] {
             ensure_directory(&kb_root.join(child))?;
         }
@@ -248,32 +245,8 @@ pub(super) fn initialize_case(case_root: &Path, initial: CaseConfig) -> io::Resu
         ensure_directory(&case_root.join(dir))?;
     }
 
-    for (kind, root, external) in [
-        ("store", &store_root, config.storage.store_root.is_some()),
-        ("tools", &tools_root, config.storage.tools_root.is_some()),
-    ] {
-        if external {
-            println!("  [external] {}", root.display());
-            continue;
-        }
-
-        let already_directory = root.is_dir();
-
-        if let Err(e) = fs::create_dir_all(root) {
-            eprintln!(
-                "Error: Failed to create local {kind} `{}`: {}",
-                root.display(),
-                e
-            );
-            return Err(e);
-        }
-
-        if already_directory {
-            println!("  [exists]  {}", root.display());
-        } else {
-            println!("  [created] {}", root.display());
-        }
-    }
+    ensure_resource(&resources.store)?;
+    ensure_resource(&resources.tools)?;
 
     // 5. 生成高层导引 CASE.md
     let case_md_path = case_root.join("CASE.md");
@@ -344,6 +317,16 @@ state/env.md
     }
 
     Ok(())
+}
+
+fn ensure_resource(root: &ResourceRoot) -> io::Result<()> {
+    match root {
+        ResourceRoot::Local(path) => ensure_directory(path),
+        ResourceRoot::Existing(path) => {
+            println!("  [external] {}", path.display());
+            Ok(())
+        }
+    }
 }
 
 fn ensure_directory(path: &Path) -> io::Result<()> {
@@ -461,6 +444,60 @@ fn existing_regular_file(path: &Path) -> io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn initialization_uses_the_published_config_instead_of_the_candidate_context() {
+        for associated in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let workspace = directory.path().join("workspace");
+            let case_root = workspace.join("stage/new");
+            fs::create_dir_all(&case_root).unwrap();
+            let other = directory.path().join("other");
+            fs::create_dir(&other).unwrap();
+            run_workspace_fixture(&other);
+            let mut actual = CaseConfig::new_case("published".into());
+            if associated {
+                actual.workspace_root = Some("../../../other".into());
+            }
+            let content = toml::to_string_pretty(&actual).unwrap();
+            fs::write(case_root.join("orev.toml"), &content).unwrap();
+            let mut candidate = CaseConfig::new_case("candidate".into());
+            candidate.workspace_root = Some("../..".into());
+            // This proposed workspace has no shared directories and must not be used.
+            initialize_case(
+                &case_root,
+                candidate,
+                Some(WorkspaceContext {
+                    root: &workspace,
+                    config: &WorkspaceConfig::default(),
+                }),
+            )
+            .unwrap();
+            assert_eq!(
+                fs::read_to_string(case_root.join("orev.toml")).unwrap(),
+                content
+            );
+            assert!(
+                fs::read_to_string(case_root.join("CASE.md"))
+                    .unwrap()
+                    .starts_with("# Analysis Case: published\n")
+            );
+            for kind in ["kb", "store", "tools"] {
+                assert_eq!(case_root.join(kind).exists(), !associated);
+            }
+        }
+    }
+
+    fn run_workspace_fixture(root: &Path) {
+        fs::write(
+            root.join("orev.toml"),
+            toml::to_string_pretty(&WorkspaceConfig::default()).unwrap(),
+        )
+        .unwrap();
+        for kind in ["kb", "store", "tools"] {
+            fs::create_dir(root.join(kind)).unwrap();
+        }
+    }
 
     #[test]
     fn file_publication_preserves_existing_files_without_writing() {

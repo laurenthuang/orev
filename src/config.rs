@@ -16,7 +16,7 @@ pub struct CaseConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_root: Option<PathBuf>,
     pub case: CaseInfo,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "StorageConfig::is_empty")]
     pub storage: StorageConfig,
 }
 
@@ -59,6 +59,48 @@ pub enum RootConfig {
     Workspace(WorkspaceConfig),
 }
 
+#[derive(Clone, Copy)]
+pub struct WorkspaceContext<'a> {
+    pub root: &'a Path,
+    pub config: &'a WorkspaceConfig,
+}
+
+#[derive(Debug)]
+pub enum ResourceRoot {
+    Local(PathBuf),
+    Existing(PathBuf),
+}
+
+impl ResourceRoot {
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Local(path) | Self::Existing(path) => path,
+        }
+    }
+
+    fn require_existing(self, field: &str) -> io::Result<Self> {
+        existing_directory(self.path())
+            .map(Self::Existing)
+            .map_err(|error| resolution_error(field, error))
+    }
+}
+
+pub struct ResolvedResources {
+    pub kb: ResourceRoot,
+    pub store: ResourceRoot,
+    pub tools: ResourceRoot,
+}
+
+impl ResolvedResources {
+    pub fn require_existing(self) -> io::Result<Self> {
+        Ok(Self {
+            kb: self.kb.require_existing("workspace knowledge base")?,
+            store: self.store.require_existing("storage.store_root")?,
+            tools: self.tools.require_existing("storage.tools_root")?,
+        })
+    }
+}
+
 impl RootConfig {
     pub fn parse(content: &str) -> Result<Self, toml::de::Error> {
         let value: toml::Value = toml::from_str(content)?;
@@ -70,11 +112,17 @@ impl RootConfig {
         }
     }
 
-    pub fn storage(&self) -> &StorageConfig {
+    pub fn resolve_resources(&self, config_root: &Path) -> io::Result<ResolvedResources> {
         match self {
-            Self::Case(config) => &config.storage,
-            Self::Workspace(config) => &config.storage,
+            Self::Case(config) => config.resolve_resources(config_root, None),
+            Self::Workspace(config) => config.resolve_resources(config_root),
         }
+    }
+}
+
+impl WorkspaceConfig {
+    pub fn resolve_resources(&self, config_root: &Path) -> io::Result<ResolvedResources> {
+        resolve_resources(config_root, &self.storage, None)
     }
 }
 
@@ -91,64 +139,139 @@ impl CaseConfig {
         }
     }
 
-    pub fn resolve_kb_root(&self, case_root: &Path) -> io::Result<PathBuf> {
-        match &self.workspace_root {
-            Some(workspace_root) => {
-                let kb = fs::canonicalize(case_root.join(workspace_root).join("kb"))?;
-                if !kb.is_dir() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "workspace knowledge base must be a directory",
-                    ));
-                }
-                Ok(kb)
-            }
-            None => Ok(case_root.join("kb")),
+    pub fn resolve_resources(
+        &self,
+        case_root: &Path,
+        staged_workspace: Option<WorkspaceContext<'_>>,
+    ) -> io::Result<ResolvedResources> {
+        let Some(workspace_root) = &self.workspace_root else {
+            return resolve_resources(case_root, &self.storage, None);
+        };
+        let workspace_root = existing_directory(&case_root.join(workspace_root))
+            .map_err(|error| resolution_error("workspace_root", error))?;
+        if let Some(context) = staged_workspace
+            && fs::canonicalize(context.root)? == workspace_root
+        {
+            return resolve_resources(case_root, &self.storage, Some(context));
         }
+
+        let config_path = workspace_root.join("orev.toml");
+        let content = fs::read_to_string(&config_path).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "Failed to read workspace configuration `{}`: {error}",
+                    config_path.display()
+                ),
+            )
+        })?;
+        let workspace: WorkspaceConfig = toml::from_str(&content).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Invalid workspace configuration `{}`: {error}",
+                    config_path.display()
+                ),
+            )
+        })?;
+        resolve_resources(
+            case_root,
+            &self.storage,
+            Some(WorkspaceContext {
+                root: &workspace_root,
+                config: &workspace,
+            }),
+        )
     }
 }
 
 impl StorageConfig {
-    pub fn resolve_store_root(&self, config_root: &Path) -> io::Result<PathBuf> {
-        resolve_storage_root(config_root, self.store_root.as_deref(), "store")
-    }
-
-    pub fn resolve_tools_root(&self, config_root: &Path) -> io::Result<PathBuf> {
-        resolve_storage_root(config_root, self.tools_root.as_deref(), "tools")
+    fn is_empty(&self) -> bool {
+        self.store_root.is_none() && self.tools_root.is_none()
     }
 }
 
-fn resolve_storage_root(
+fn resolve_resources(
+    config_root: &Path,
+    storage: &StorageConfig,
+    workspace: Option<WorkspaceContext<'_>>,
+) -> io::Result<ResolvedResources> {
+    let config_root = fs::canonicalize(config_root)?;
+    let store = resolve_storage_field(
+        &config_root,
+        storage.store_root.as_deref(),
+        workspace.map(|context| (context.root, context.config.storage.store_root.as_deref())),
+        "store",
+    )?;
+    let tools = resolve_storage_field(
+        &config_root,
+        storage.tools_root.as_deref(),
+        workspace.map(|context| (context.root, context.config.storage.tools_root.as_deref())),
+        "tools",
+    )?;
+    let kb = match workspace {
+        Some(context) => ResourceRoot::Existing(
+            existing_directory(&context.root.join("kb"))
+                .map_err(|error| resolution_error("workspace knowledge base", error))?,
+        ),
+        None => ResourceRoot::Local(config_root.join("kb")),
+    };
+    Ok(ResolvedResources { kb, store, tools })
+}
+
+fn resolve_storage_field(
     config_root: &Path,
     configured: Option<&Path>,
-    default_dir: &str,
-) -> io::Result<PathBuf> {
-    let config_root = fs::canonicalize(config_root)?;
-
-    let Some(configured) = configured else {
-        return Ok(config_root.join(default_dir));
+    inherited: Option<(&Path, Option<&Path>)>,
+    kind: &str,
+) -> io::Result<ResourceRoot> {
+    let (root, configured, shared) = match (configured, inherited) {
+        (Some(path), _) => (config_root, Some(path), false),
+        (None, Some((root, path))) => (root, path, true),
+        (None, None) => (config_root, None, false),
     };
+    resolve_storage_root(root, configured, kind, shared)
+        .map_err(|error| resolution_error(&format!("storage.{kind}_root"), error))
+}
 
-    if !configured.is_absolute() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("expected an absolute path, got `{}`", configured.display()),
-        ));
-    }
+fn resolution_error(field: &str, error: io::Error) -> io::Error {
+    io::Error::new(error.kind(), format!("Failed to resolve {field}: {error}"))
+}
 
-    let resolved = fs::canonicalize(configured).map_err(|e| {
+fn existing_directory(path: &Path) -> io::Result<PathBuf> {
+    let resolved = fs::canonicalize(path).map_err(|error| {
         io::Error::new(
-            e.kind(),
-            format!("cannot resolve `{}`: {}", configured.display(), e),
+            error.kind(),
+            format!("cannot resolve `{}`: {error}", path.display()),
         )
     })?;
-
     if !fs::metadata(&resolved)?.is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("expected an existing directory at `{}`", resolved.display()),
         ));
     }
+    Ok(resolved)
+}
+
+fn resolve_storage_root(
+    config_root: &Path,
+    configured: Option<&Path>,
+    default_dir: &str,
+    shared: bool,
+) -> io::Result<ResourceRoot> {
+    let config_root = fs::canonicalize(config_root)?;
+
+    let Some(configured) = configured else {
+        let local = config_root.join(default_dir);
+        return if shared {
+            existing_directory(&local).map(ResourceRoot::Existing)
+        } else {
+            Ok(ResourceRoot::Local(local))
+        };
+    };
+
+    let resolved = existing_directory(&config_root.join(configured))?;
 
     if resolved.starts_with(&config_root) {
         return Err(io::Error::new(
@@ -160,7 +283,7 @@ fn resolve_storage_root(
         ));
     }
 
-    Ok(resolved)
+    Ok(ResourceRoot::Existing(resolved))
 }
 
 #[cfg(test)]

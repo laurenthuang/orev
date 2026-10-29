@@ -1,4 +1,6 @@
-use crate::config::{CaseConfig, RootConfig, StorageConfig, WorkspaceConfig, WorkspaceInfo};
+use crate::config::{
+    CaseConfig, RootConfig, StorageConfig, WorkspaceConfig, WorkspaceContext, WorkspaceInfo,
+};
 use crate::ops::init::{WORKSPACE_IGNORES, WORKSPACE_README, initialize_case};
 use std::env;
 use std::ffi::OsStr;
@@ -156,22 +158,9 @@ pub fn run_add(name: &str) -> io::Result<()> {
     result.inspect_err(|error| eprintln!("Error: Failed to add case: {}", error))
 }
 
-fn shared_storage(config_root: &Path, storage: &StorageConfig) -> io::Result<StorageConfig> {
-    require_directory(&config_root.join("kb"))?;
-    Ok(StorageConfig {
-        store_root: Some(require_directory(
-            &storage.resolve_store_root(config_root)?,
-        )?),
-        tools_root: Some(require_directory(
-            &storage.resolve_tools_root(config_root)?,
-        )?),
-    })
-}
-
-fn workspace_case(name: &str, storage: StorageConfig) -> CaseConfig {
+fn workspace_case(name: &str) -> CaseConfig {
     let mut config = CaseConfig::new_case(name.to_string());
     config.workspace_root = Some(PathBuf::from("../.."));
-    config.storage = storage;
     config
 }
 
@@ -235,7 +224,9 @@ fn add_locked(
         }
     }
     require_absent(&cases.join(name))?;
-    let storage = shared_storage(config_root, &workspace.storage)?;
+    let resources = workspace
+        .resolve_resources(config_root)?
+        .require_existing()?;
     let entries = if original.is_some() {
         fs::read_dir(config_root)?
             .map(|entry| entry.map(|entry| entry.path()))
@@ -255,15 +246,9 @@ fn add_locked(
     if original.is_some() {
         let resolved_config_root = require_directory(config_root)?;
         let mut shared_paths = vec![
-            require_directory(&config_root.join("kb"))?,
-            storage
-                .store_root
-                .clone()
-                .ok_or_else(|| invalid("store root is missing"))?,
-            storage
-                .tools_root
-                .clone()
-                .ok_or_else(|| invalid("tools root is missing"))?,
+            resources.kb.path().to_path_buf(),
+            resources.store.path().to_path_buf(),
+            resources.tools.path().to_path_buf(),
         ];
         for entry in &entries {
             if is_shared_entry(
@@ -295,13 +280,20 @@ fn add_locked(
     let result = (|| {
         let new = transaction.staging.path().join("new");
         fs::create_dir(&new)?;
-        initialize_case(&new, workspace_case(name, storage.clone()))?;
+        initialize_case(
+            &new,
+            workspace_case(name),
+            Some(WorkspaceContext {
+                root: config_root,
+                config: &workspace,
+            }),
+        )?;
         if let Some(mut original) = original {
             let original_name = original.case.name.clone();
             let old = transaction.staging.path().join("original");
             fs::create_dir(&old)?;
             original.workspace_root = Some(PathBuf::from("../.."));
-            original.storage = storage;
+            original.storage = StorageConfig::default();
             fs::write(
                 old.join("orev.toml"),
                 toml::to_string_pretty(&original).map_err(invalid_data)?,
@@ -465,7 +457,7 @@ mod tests {
     fn conversion_rejects_relocated_shared_assets_with_noncanonical_root() {
         let directory = tempfile::tempdir().unwrap();
         let config_root = directory.path();
-        initialize_case(config_root, CaseConfig::new_case("original".into())).unwrap();
+        initialize_case(config_root, CaseConfig::new_case("original".into()), None).unwrap();
         fs::create_dir(config_root.join("alias-component")).unwrap();
         fs::create_dir(config_root.join("notes")).unwrap();
         fs::rename(config_root.join("kb"), config_root.join("notes/knowledge")).unwrap();
@@ -501,7 +493,12 @@ mod tests {
     #[test]
     fn conversion_restores_original_files_when_registry_publication_fails() {
         let config_root = tempfile::tempdir().unwrap();
-        initialize_case(config_root.path(), CaseConfig::new_case("original".into())).unwrap();
+        initialize_case(
+            config_root.path(),
+            CaseConfig::new_case("original".into()),
+            None,
+        )
+        .unwrap();
         fs::write(config_root.path().join("notes.md"), b"analyst notes\n").unwrap();
         let original_config = fs::read(config_root.path().join("orev.toml")).unwrap();
         let original_guide = fs::read(config_root.path().join("CASE.md")).unwrap();
@@ -544,6 +541,43 @@ mod tests {
     }
 
     #[test]
+    fn conversion_keeps_the_standalone_config_until_transaction_publication() {
+        let config_root = tempfile::tempdir().unwrap();
+        initialize_case(
+            config_root.path(),
+            CaseConfig::new_case("original".into()),
+            None,
+        )
+        .unwrap();
+        let original = fs::read(config_root.path().join("orev.toml")).unwrap();
+        add_locked(config_root.path(), "second", |path, workspace| {
+            assert_eq!(fs::read(path)?, original);
+            assert!(matches!(
+                RootConfig::parse(&fs::read_to_string(path)?).unwrap(),
+                RootConfig::Case(_)
+            ));
+            for name in ["original", "second"] {
+                let content = fs::read_to_string(
+                    config_root
+                        .path()
+                        .join("cases")
+                        .join(name)
+                        .join("orev.toml"),
+                )?;
+                assert!(content.contains("workspace_root = \"../..\""));
+                assert!(!content.contains("[storage]"));
+            }
+            replace_config(path, workspace)
+        })
+        .unwrap();
+        assert!(matches!(
+            RootConfig::parse(&fs::read_to_string(config_root.path().join("orev.toml")).unwrap())
+                .unwrap(),
+            RootConfig::Workspace(_)
+        ));
+    }
+
+    #[test]
     fn adding_case_preserves_registry_and_existing_cases_when_publication_fails() {
         let config_root = tempfile::tempdir().unwrap();
         for directory in ["cases/existing", "kb", "store", "tools"] {
@@ -576,7 +610,12 @@ mod tests {
     #[test]
     fn incomplete_rollback_preserves_recovery_data_without_overwriting_new_files() {
         let config_root = tempfile::tempdir().unwrap();
-        initialize_case(config_root.path(), CaseConfig::new_case("original".into())).unwrap();
+        initialize_case(
+            config_root.path(),
+            CaseConfig::new_case("original".into()),
+            None,
+        )
+        .unwrap();
         fs::write(config_root.path().join("notes.md"), b"original notes").unwrap();
         let original_config = fs::read(config_root.path().join("orev.toml")).unwrap();
         let error = add_locked(config_root.path(), "second", |_, _| {
