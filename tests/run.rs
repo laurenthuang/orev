@@ -269,7 +269,7 @@ fn redaction_diagnostics_cover_runner_errors() {
 }
 
 #[test]
-fn run_preserves_arguments_and_captures_both_streams_without_a_workspace() {
+fn run_preserves_arguments_and_captures_both_streams_without_configuration() {
     let root = tempfile::tempdir().unwrap();
     let tool = fixture(
         root.path(),

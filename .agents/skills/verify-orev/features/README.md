@@ -31,8 +31,8 @@ Each feature file has an H1 title and one paragraph about user-visible behavior,
 
 ## Features
 
-- [Initialize a case or project](./init.md) covers standalone cases, projects, layout, and preserving re-runs.
-- [Add and convert cases](./case-add.md) covers `case add` in a project, conversion of a standalone case, and rejected names.
-- [Status](./status.md) covers case and project status output and its exit-code limit.
+- [Initialize a case or workspace](./init.md) covers standalone cases, workspaces, layout, and preserving re-runs.
+- [Add and convert cases](./case-add.md) covers `case add` in a workspace, conversion of a standalone case, and rejected names.
+- [Status](./status.md) covers case and workspace status output and its exit-code limit.
 - [Doctor](./doctor.md) covers directory, configuration, and tool diagnostics, including Ghidra discovery.
 - [Record a tool run](./run.md) covers records, metadata, modes, redaction, exit codes, signals, and argument parsing.

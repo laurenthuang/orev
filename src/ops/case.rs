@@ -1,4 +1,4 @@
-use crate::config::{Config, ProjectConfig, StorageConfig, WorkspaceConfig, WorkspaceInfo};
+use crate::config::{CaseConfig, RootConfig, StorageConfig, WorkspaceConfig, WorkspaceInfo};
 use crate::ops::init::{WORKSPACE_IGNORES, WORKSPACE_README, initialize_case};
 use std::env;
 use std::ffi::OsStr;
@@ -54,8 +54,8 @@ fn validate_name(name: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn read_config(root: &Path) -> io::Result<String> {
-    let path = root.join("orev.toml");
+fn read_config(config_root: &Path) -> io::Result<String> {
+    let path = config_root.join("orev.toml");
     let metadata = fs::symlink_metadata(&path)?;
     if !metadata.file_type().is_file() {
         return Err(invalid(format!(
@@ -67,15 +67,15 @@ fn read_config(root: &Path) -> io::Result<String> {
 }
 
 fn discover(start: &Path) -> io::Result<PathBuf> {
-    for root in start.ancestors() {
-        match fs::symlink_metadata(root.join("orev.toml")) {
+    for config_root in start.ancestors() {
+        match fs::symlink_metadata(config_root.join("orev.toml")) {
             Ok(_) => {
-                let text = read_config(root)?;
-                return match WorkspaceConfig::parse(&text).map_err(invalid_data)? {
-                    WorkspaceConfig::Project(_) => Ok(root.to_path_buf()),
-                    WorkspaceConfig::Case(config) => match config.project_root {
-                        Some(project) => fs::canonicalize(root.join(project)),
-                        None => Ok(root.to_path_buf()),
+                let text = read_config(config_root)?;
+                return match RootConfig::parse(&text).map_err(invalid_data)? {
+                    RootConfig::Workspace(_) => Ok(config_root.to_path_buf()),
+                    RootConfig::Case(config) => match config.workspace_root {
+                        Some(workspace_root) => fs::canonicalize(config_root.join(workspace_root)),
+                        None => Ok(config_root.to_path_buf()),
                     },
                 };
             }
@@ -125,19 +125,22 @@ fn require_absent(path: &Path) -> io::Result<()> {
 pub fn run_add(name: &str) -> io::Result<()> {
     let result = (|| {
         validate_name(name)?;
-        let root = discover(&env::current_dir()?)?;
-        let lock = root.join(".orev-case-add.lock");
+        let config_root = discover(&env::current_dir()?)?;
+        let lock = config_root.join(".orev-case-add.lock");
         fs::create_dir(&lock).map_err(|error| {
             io::Error::new(
                 error.kind(),
-                format!("cannot acquire project lock `{}`: {error}", lock.display()),
+                format!(
+                    "cannot acquire workspace lock `{}`: {error}",
+                    lock.display()
+                ),
             )
         })?;
-        let operation = add_locked(&root, name, replace_config);
+        let operation = add_locked(&config_root, name, replace_config);
         let cleanup = fs::remove_dir(&lock);
         if let Err(error) = &cleanup {
             eprintln!(
-                "Error: Failed to remove project lock `{}`: {}",
+                "Error: Failed to remove workspace lock `{}`: {}",
                 lock.display(),
                 error
             );
@@ -146,41 +149,45 @@ pub fn run_add(name: &str) -> io::Result<()> {
         cleanup?;
         println!(
             "Success! Case `{name}` created at `{}`.",
-            root.join("cases").join(name).display()
+            config_root.join("cases").join(name).display()
         );
         Ok(())
     })();
     result.inspect_err(|error| eprintln!("Error: Failed to add case: {}", error))
 }
 
-fn shared_storage(root: &Path, storage: &StorageConfig) -> io::Result<StorageConfig> {
-    require_directory(&root.join("kb"))?;
+fn shared_storage(config_root: &Path, storage: &StorageConfig) -> io::Result<StorageConfig> {
+    require_directory(&config_root.join("kb"))?;
     Ok(StorageConfig {
-        store_root: Some(require_directory(&storage.resolve_store_root(root)?)?),
-        tools_root: Some(require_directory(&storage.resolve_tools_root(root)?)?),
+        store_root: Some(require_directory(
+            &storage.resolve_store_root(config_root)?,
+        )?),
+        tools_root: Some(require_directory(
+            &storage.resolve_tools_root(config_root)?,
+        )?),
     })
 }
 
-fn shared_case(name: &str, storage: StorageConfig) -> Config {
-    let mut config = Config::new_case(name.to_string());
-    config.project_root = Some(PathBuf::from("../.."));
+fn workspace_case(name: &str, storage: StorageConfig) -> CaseConfig {
+    let mut config = CaseConfig::new_case(name.to_string());
+    config.workspace_root = Some(PathBuf::from("../.."));
     config.storage = storage;
     config
 }
 
-fn read_project(root: &Path) -> io::Result<(ProjectConfig, Option<Config>)> {
-    let text = read_config(root)?;
-    let (project, original) = match WorkspaceConfig::parse(&text).map_err(invalid_data)? {
-        WorkspaceConfig::Project(project) => (project, None),
-        WorkspaceConfig::Case(original) => {
-            if original.project_root.is_some() {
+fn read_workspace(config_root: &Path) -> io::Result<(WorkspaceConfig, Option<CaseConfig>)> {
+    let text = read_config(config_root)?;
+    let (workspace, original) = match RootConfig::parse(&text).map_err(invalid_data)? {
+        RootConfig::Workspace(workspace) => (workspace, None),
+        RootConfig::Case(original) => {
+            if original.workspace_root.is_some() {
                 return Err(invalid(
-                    "project_root must point to a multi-case project configuration",
+                    "workspace_root must point to a multi-case workspace configuration",
                 ));
             }
             validate_name(&original.case.name)?;
             (
-                ProjectConfig {
+                WorkspaceConfig {
                     workspace: WorkspaceInfo {
                         cases: vec![original.case.name.clone()],
                     },
@@ -190,37 +197,37 @@ fn read_project(root: &Path) -> io::Result<(ProjectConfig, Option<Config>)> {
             )
         }
     };
-    for registered in &project.workspace.cases {
+    for registered in &workspace.workspace.cases {
         validate_name(registered)?;
     }
-    Ok((project, original))
+    Ok((workspace, original))
 }
 
 fn add_locked(
-    root: &Path,
+    config_root: &Path,
     name: &str,
     publish: impl FnOnce(&Path, &str) -> io::Result<()>,
 ) -> io::Result<()> {
-    let (mut project, original) = read_project(root)?;
+    let (mut workspace, original) = read_workspace(config_root)?;
     if let Some(original) = &original {
         if original.case.name == name {
             return Err(invalid(
                 "new case name conflicts with the original case name",
             ));
         }
-        require_absent(&root.join("cases"))?;
+        require_absent(&config_root.join("cases"))?;
     }
     let mut seen: Vec<&str> = Vec::new();
-    for registered in &project.workspace.cases {
+    for registered in &workspace.workspace.cases {
         if seen.contains(&registered.as_str()) {
             return Err(invalid(format!("duplicate registered case `{registered}`")));
         }
         seen.push(registered);
     }
-    if project.workspace.cases.iter().any(|case| case == name) {
+    if workspace.workspace.cases.iter().any(|case| case == name) {
         return Err(invalid(format!("case `{name}` is already registered")));
     }
-    let cases = root.join("cases");
+    let cases = config_root.join("cases");
     if original.is_none() {
         let metadata = fs::symlink_metadata(&cases)?;
         if !metadata.file_type().is_dir() {
@@ -228,9 +235,9 @@ fn add_locked(
         }
     }
     require_absent(&cases.join(name))?;
-    let storage = shared_storage(root, &project.storage)?;
+    let storage = shared_storage(config_root, &workspace.storage)?;
     let entries = if original.is_some() {
-        fs::read_dir(root)?
+        fs::read_dir(config_root)?
             .map(|entry| entry.map(|entry| entry.path()))
             .collect::<io::Result<Vec<_>>>()?
     } else {
@@ -246,9 +253,9 @@ fn add_locked(
         }
     }
     if original.is_some() {
-        let resolved_root = require_directory(root)?;
+        let resolved_config_root = require_directory(config_root)?;
         let mut shared_paths = vec![
-            require_directory(&root.join("kb"))?,
+            require_directory(&config_root.join("kb"))?,
             storage
                 .store_root
                 .clone()
@@ -269,7 +276,7 @@ fn add_locked(
             }
         }
         for shared in shared_paths {
-            if let Ok(relative) = shared.strip_prefix(&resolved_root)
+            if let Ok(relative) = shared.strip_prefix(&resolved_config_root)
                 && let Some(first) = relative.components().next()
                 && !["kb", "store", "tools", "corpus", ".git"]
                     .iter()
@@ -282,18 +289,18 @@ fn add_locked(
             }
         }
     }
-    project.workspace.cases.push(name.to_string());
-    let project_text = toml::to_string_pretty(&project).map_err(invalid_data)?;
-    let mut transaction = Transaction::new(root)?;
+    workspace.workspace.cases.push(name.to_string());
+    let workspace_text = toml::to_string_pretty(&workspace).map_err(invalid_data)?;
+    let mut transaction = Transaction::new(config_root)?;
     let result = (|| {
         let new = transaction.staging.path().join("new");
         fs::create_dir(&new)?;
-        initialize_case(&new, shared_case(name, storage.clone()))?;
+        initialize_case(&new, workspace_case(name, storage.clone()))?;
         if let Some(mut original) = original {
             let original_name = original.case.name.clone();
             let old = transaction.staging.path().join("original");
             fs::create_dir(&old)?;
-            original.project_root = Some(PathBuf::from("../.."));
+            original.workspace_root = Some(PathBuf::from("../.."));
             original.storage = storage;
             fs::write(
                 old.join("orev.toml"),
@@ -317,11 +324,11 @@ fn add_locked(
             ] {
                 let staged = transaction.staging.path().join(filename);
                 fs::write(&staged, content)?;
-                transaction.move_path(&staged, &root.join(filename))?;
+                transaction.move_path(&staged, &config_root.join(filename))?;
             }
         }
         transaction.move_path(&new, &cases.join(name))?;
-        publish(&root.join("orev.toml"), &project_text)?;
+        publish(&config_root.join("orev.toml"), &workspace_text)?;
         Ok(())
     })();
     match result {
@@ -360,11 +367,11 @@ struct Transaction {
 }
 
 impl Transaction {
-    fn new(root: &Path) -> io::Result<Self> {
+    fn new(config_root: &Path) -> io::Result<Self> {
         Ok(Self {
             staging: tempfile::Builder::new()
                 .prefix(".orev-case-stage-")
-                .tempdir_in(root)?,
+                .tempdir_in(config_root)?,
             moves: Vec::new(),
             created_cases: None,
         })
@@ -457,15 +464,15 @@ mod tests {
     #[test]
     fn conversion_rejects_relocated_shared_assets_with_noncanonical_root() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path();
-        initialize_case(root, Config::new_case("original".into())).unwrap();
-        fs::create_dir(root.join("alias-component")).unwrap();
-        fs::create_dir(root.join("notes")).unwrap();
-        fs::rename(root.join("kb"), root.join("notes/knowledge")).unwrap();
-        std::os::unix::fs::symlink("notes/knowledge", root.join("kb")).unwrap();
-        fs::write(root.join("notes/knowledge/evidence"), b"preserve").unwrap();
-        let original_config = fs::read(root.join("orev.toml")).unwrap();
-        let mixed_root = root.join("alias-component/..");
+        let config_root = directory.path();
+        initialize_case(config_root, CaseConfig::new_case("original".into())).unwrap();
+        fs::create_dir(config_root.join("alias-component")).unwrap();
+        fs::create_dir(config_root.join("notes")).unwrap();
+        fs::rename(config_root.join("kb"), config_root.join("notes/knowledge")).unwrap();
+        std::os::unix::fs::symlink("notes/knowledge", config_root.join("kb")).unwrap();
+        fs::write(config_root.join("notes/knowledge/evidence"), b"preserve").unwrap();
+        let original_config = fs::read(config_root.join("orev.toml")).unwrap();
+        let mixed_root = config_root.join("alias-component/..");
         let error = add_locked(&mixed_root, "second", |_, _| {
             panic!("unsafe conversion must fail before registry publication");
         })
@@ -475,24 +482,31 @@ mod tests {
                 .to_string()
                 .contains("points into data being relocated")
         );
-        assert_eq!(fs::read(root.join("orev.toml")).unwrap(), original_config);
         assert_eq!(
-            fs::read(root.join("notes/knowledge/evidence")).unwrap(),
+            fs::read(config_root.join("orev.toml")).unwrap(),
+            original_config
+        );
+        assert_eq!(
+            fs::read(config_root.join("notes/knowledge/evidence")).unwrap(),
             b"preserve"
         );
-        assert!(!root.join("cases").exists());
-        assert!(fs::symlink_metadata(root.join("kb")).unwrap().is_symlink());
+        assert!(!config_root.join("cases").exists());
+        assert!(
+            fs::symlink_metadata(config_root.join("kb"))
+                .unwrap()
+                .is_symlink()
+        );
     }
 
     #[test]
     fn conversion_restores_original_files_when_registry_publication_fails() {
-        let root = tempfile::tempdir().unwrap();
-        initialize_case(root.path(), Config::new_case("original".into())).unwrap();
-        fs::write(root.path().join("notes.md"), b"analyst notes\n").unwrap();
-        let original_config = fs::read(root.path().join("orev.toml")).unwrap();
-        let original_guide = fs::read(root.path().join("CASE.md")).unwrap();
-        let original_ignore = fs::read(root.path().join(".gitignore")).unwrap();
-        let error = add_locked(root.path(), "second", |_, _| {
+        let config_root = tempfile::tempdir().unwrap();
+        initialize_case(config_root.path(), CaseConfig::new_case("original".into())).unwrap();
+        fs::write(config_root.path().join("notes.md"), b"analyst notes\n").unwrap();
+        let original_config = fs::read(config_root.path().join("orev.toml")).unwrap();
+        let original_guide = fs::read(config_root.path().join("CASE.md")).unwrap();
+        let original_ignore = fs::read(config_root.path().join(".gitignore")).unwrap();
+        let error = add_locked(config_root.path(), "second", |_, _| {
             Err(io::Error::other("injected registry publication failure"))
         })
         .unwrap_err();
@@ -502,23 +516,23 @@ mod tests {
                 .contains("injected registry publication failure")
         );
         assert_eq!(
-            fs::read(root.path().join("orev.toml")).unwrap(),
+            fs::read(config_root.path().join("orev.toml")).unwrap(),
             original_config
         );
         assert_eq!(
-            fs::read(root.path().join("CASE.md")).unwrap(),
+            fs::read(config_root.path().join("CASE.md")).unwrap(),
             original_guide
         );
         assert_eq!(
-            fs::read(root.path().join(".gitignore")).unwrap(),
+            fs::read(config_root.path().join(".gitignore")).unwrap(),
             original_ignore
         );
         assert_eq!(
-            fs::read(root.path().join("notes.md")).unwrap(),
+            fs::read(config_root.path().join("notes.md")).unwrap(),
             b"analyst notes\n"
         );
-        assert!(!root.path().join("cases").exists());
-        for entry in fs::read_dir(root.path()).unwrap() {
+        assert!(!config_root.path().join("cases").exists());
+        for entry in fs::read_dir(config_root.path()).unwrap() {
             assert!(
                 !entry
                     .unwrap()
@@ -531,42 +545,45 @@ mod tests {
 
     #[test]
     fn adding_case_preserves_registry_and_existing_cases_when_publication_fails() {
-        let root = tempfile::tempdir().unwrap();
+        let config_root = tempfile::tempdir().unwrap();
         for directory in ["cases/existing", "kb", "store", "tools"] {
-            fs::create_dir_all(root.path().join(directory)).unwrap();
+            fs::create_dir_all(config_root.path().join(directory)).unwrap();
         }
-        let project = ProjectConfig {
+        let workspace = WorkspaceConfig {
             workspace: WorkspaceInfo {
                 cases: vec!["existing".into()],
             },
             storage: StorageConfig::default(),
         };
-        let content = toml::to_string_pretty(&project).unwrap();
-        fs::write(root.path().join("orev.toml"), &content).unwrap();
-        fs::write(root.path().join("cases/existing/note"), b"preserve").unwrap();
-        add_locked(root.path(), "second", |_, _| {
+        let content = toml::to_string_pretty(&workspace).unwrap();
+        fs::write(config_root.path().join("orev.toml"), &content).unwrap();
+        fs::write(config_root.path().join("cases/existing/note"), b"preserve").unwrap();
+        add_locked(config_root.path(), "second", |_, _| {
             Err(io::Error::other("injected registry publication failure"))
         })
         .unwrap_err();
         assert_eq!(
-            fs::read_to_string(root.path().join("orev.toml")).unwrap(),
+            fs::read_to_string(config_root.path().join("orev.toml")).unwrap(),
             content
         );
         assert_eq!(
-            fs::read(root.path().join("cases/existing/note")).unwrap(),
+            fs::read(config_root.path().join("cases/existing/note")).unwrap(),
             b"preserve"
         );
-        assert!(!root.path().join("cases/second").exists());
+        assert!(!config_root.path().join("cases/second").exists());
     }
 
     #[test]
     fn incomplete_rollback_preserves_recovery_data_without_overwriting_new_files() {
-        let root = tempfile::tempdir().unwrap();
-        initialize_case(root.path(), Config::new_case("original".into())).unwrap();
-        fs::write(root.path().join("notes.md"), b"original notes").unwrap();
-        let original_config = fs::read(root.path().join("orev.toml")).unwrap();
-        let error = add_locked(root.path(), "second", |_, _| {
-            fs::write(root.path().join("notes.md"), b"concurrent analyst notes")?;
+        let config_root = tempfile::tempdir().unwrap();
+        initialize_case(config_root.path(), CaseConfig::new_case("original".into())).unwrap();
+        fs::write(config_root.path().join("notes.md"), b"original notes").unwrap();
+        let original_config = fs::read(config_root.path().join("orev.toml")).unwrap();
+        let error = add_locked(config_root.path(), "second", |_, _| {
+            fs::write(
+                config_root.path().join("notes.md"),
+                b"concurrent analyst notes",
+            )?;
             Err(io::Error::other("injected publication failure"))
         })
         .unwrap_err();
@@ -574,14 +591,14 @@ mod tests {
         assert!(message.contains("injected publication failure"));
         assert!(message.contains("rollback incomplete"));
         assert_eq!(
-            fs::read(root.path().join("notes.md")).unwrap(),
+            fs::read(config_root.path().join("notes.md")).unwrap(),
             b"concurrent analyst notes"
         );
         assert_eq!(
-            fs::read(root.path().join("orev.toml")).unwrap(),
+            fs::read(config_root.path().join("orev.toml")).unwrap(),
             original_config
         );
-        let recovery = fs::read_dir(root.path())
+        let recovery = fs::read_dir(config_root.path())
             .unwrap()
             .map(|entry| entry.unwrap().path())
             .find(|path| {

@@ -7,7 +7,10 @@ description: Drive the real orev CLI (Rust, Linux) the way a user does, in an is
 
 orev is a short-lived CLI. Its user surface is the terminal: `init`, `case add`, `status`, `doctor`, and `run`. `run` needs a real PTY, Ctrl-C, and resize. There is no server. Each verification run builds the release binary once. It then drives it in a private tmux session whose shell starts in a private scratch directory under `/tmp`. Unit and integration tests (`cargo test`) are not a substitute: they never type into a real terminal.
 
-All steps use one helper, run from the repo root:
+Use the [canonical glossary](../../../docs/glossary.md) for case and workspace terminology.
+Neither a scratch directory nor a repository root implies an Orev workspace.
+
+All steps use one helper, run from the repository root:
 
 ```bash
 S=.agents/skills/verify-orev/scripts/verify-orev.sh
@@ -22,7 +25,7 @@ Choose a run id (`[A-Za-z0-9_-]+`), for example `ID=redact-$(date +%s)`. The id 
 | scratch (deleted at cleanup) | `/tmp/orev-verify-$ID/`, with `HOME=/tmp/orev-verify-$ID/home` |
 | evidence (kept) | `target/verify-orev/$ID/` |
 
-Two runs with different ids can run side by side. Never drive a session or directory that your run did not create. In particular, do not run orev in `demo_wks/`, which is the user's own workspace.
+Two runs with different ids can run side by side. Never drive a session or directory that your run did not create. In particular, do not run orev in `demo_wks/`, which contains user-owned data.
 
 ## Launch
 
@@ -72,7 +75,7 @@ The feature map in [features/README.md](features/README.md) lists every user-fac
 Each `send` and `capture` writes `target/verify-orev/$ID/<name>.txt`. That file holds the command typed, everything orev printed (stdout and stderr share the PTY), and `EXIT=`. Copy files that orev wrote into evidence before cleanup:
 
 ```bash
-$S keep "$ID" proj/cases/router-audit/cat-20261029T024655Z   # path relative to scratch
+$S keep "$ID" wks/cases/router-audit/cat-20261029T024655Z   # path relative to scratch
 ```
 
 `keep` copies into `target/verify-orev/$ID/files/` and preserves modes, so `0700`/`0600` record permissions stay visible.

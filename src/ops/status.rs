@@ -1,18 +1,18 @@
 // src/ops/status.rs
-use crate::config::WorkspaceConfig;
+use crate::config::RootConfig;
 use std::env;
 use std::fs;
 
-/// 核心业务函数：展示当前案例或多案件项目的基本信息
+/// 核心业务函数：展示当前案例或多案件工作区的基本信息
 pub fn run_status() {
-    let current_dir = env::current_dir().expect("Failed to get current directory");
-    let config_path = current_dir.join("orev.toml");
+    let config_root = env::current_dir().expect("Failed to get current directory");
+    let config_path = config_root.join("orev.toml");
 
     // 1. 校验配置文件是否存在
     if !config_path.exists() {
         println!("Error: `orev.toml` not found in current directory.");
         println!(
-            "Please run `orev init` for a single case project or `orev init --workspace` for a multi-case project."
+            "Please run `orev init` for a standalone case or `orev init --workspace` for a workspace."
         );
         return;
     }
@@ -26,7 +26,7 @@ pub fn run_status() {
         }
     };
 
-    let config = match WorkspaceConfig::parse(&config_content) {
+    let config = match RootConfig::parse(&config_content) {
         Ok(config) => config,
         Err(e) => {
             eprintln!("Error: Failed to parse `orev.toml` format: {}", e);
@@ -35,19 +35,19 @@ pub fn run_status() {
     };
 
     match config {
-        WorkspaceConfig::Project(config) => {
-            println!("=== Orev Multi-Case Project Workspace Status ===");
-            println!("Workspace Root:  {}", current_dir.display());
+        RootConfig::Workspace(config) => {
+            println!("=== Orev Workspace Status ===");
+            println!("Workspace Root:  {}", config_root.display());
             println!("Registered Cases: {}", config.workspace.cases.len());
             for name in &config.workspace.cases {
                 println!("  - {}", name);
             }
         }
-        WorkspaceConfig::Case(config) => {
-            println!("=== Orev Analysis Case Workspace Status ===");
+        RootConfig::Case(config) => {
+            println!("=== Orev Case Status ===");
             println!("Case Name:       {}", config.case.name);
             println!("Case Version:    {}", config.case.version);
-            println!("Workspace Root:  {}", current_dir.display());
+            println!("Case Root:       {}", config_root.display());
         }
     }
 }

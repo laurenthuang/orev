@@ -1,11 +1,11 @@
 // src/ops/init.rs
-use crate::config::{Config, ProjectConfig};
+use crate::config::{CaseConfig, WorkspaceConfig};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-pub(super) const WORKSPACE_IGNORES: &str = r#"# Orev Multi-Case Workspace Ignores
+pub(super) const WORKSPACE_IGNORES: &str = r#"# Orev Workspace Ignores
 /.orev-case-add.lock/
 /.orev-case-stage-*/
 
@@ -31,35 +31,35 @@ state/env.md
 /cases/*/state/env.md
 /cases/*/.orev/
 "#;
-pub(super) const WORKSPACE_README: &str = "# Orev Multi-Case Workspace\n\n\
+pub(super) const WORKSPACE_README: &str = "# Orev Workspace\n\n\
 Run `orev case add <name>` here or in a subdirectory to create a case in `cases/`.\n\
 The root `orev.toml` registers cases. `kb/`, `store/`, and `tools/` are shared.\n\
 `corpus/` is optional. There is no automatic analysis or tool execution.\n\
 Run `orev status` here to list registered cases, or from a case root for case details.\n\
 Run `orev doctor` here for shared directories, or from a case root for case directories.\n";
 
-/// 初始化多案件项目及空案件登记表。
+/// 初始化多案件工作区及空案件登记表。
 pub fn run_workspace_init(path: Option<String>) -> io::Result<()> {
     let current_dir = env::current_dir().inspect_err(|error| {
         eprintln!("Error: Failed to get current directory: {}", error);
     })?;
-    let workspace_dir = match path {
+    let workspace_root = match path {
         Some(path) => current_dir.join(path),
         None => current_dir,
     };
 
-    let project_path = workspace_dir.join("orev.toml");
-    let project_exists = existing_regular_file(&project_path)?;
-    if project_exists {
-        let content = fs::read_to_string(&project_path).inspect_err(|e| {
-            eprintln!("Error: Failed to read `{}`: {}", project_path.display(), e);
+    let config_path = workspace_root.join("orev.toml");
+    let config_exists = existing_regular_file(&config_path)?;
+    if config_exists {
+        let content = fs::read_to_string(&config_path).inspect_err(|e| {
+            eprintln!("Error: Failed to read `{}`: {}", config_path.display(), e);
         })?;
-        let _: ProjectConfig = toml::from_str(&content).map_err(|e| {
+        let _: WorkspaceConfig = toml::from_str(&content).map_err(|e| {
             let error = io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "not a multi-case project configuration at `{}`: {e}",
-                    project_path.display()
+                    "not a multi-case workspace configuration at `{}`: {e}",
+                    config_path.display()
                 ),
             );
             eprintln!("Error: {}", error);
@@ -67,7 +67,7 @@ pub fn run_workspace_init(path: Option<String>) -> io::Result<()> {
         })?;
     }
     {
-        let marker_path = workspace_dir.join("CASE.md");
+        let marker_path = workspace_root.join("CASE.md");
         match fs::symlink_metadata(&marker_path) {
             Ok(_) => {
                 let error = io::Error::new(
@@ -92,9 +92,9 @@ pub fn run_workspace_init(path: Option<String>) -> io::Result<()> {
         }
     }
 
-    println!("Initializing multi-case project workspace...");
-    println!("Workspace Root: {}", workspace_dir.display());
-    ensure_directory(&workspace_dir)?;
+    println!("Initializing workspace...");
+    println!("Workspace Root: {}", workspace_root.display());
+    ensure_directory(&workspace_root)?;
     for directory in [
         "cases",
         "kb/techniques",
@@ -103,19 +103,19 @@ pub fn run_workspace_init(path: Option<String>) -> io::Result<()> {
         "store",
         "tools",
     ] {
-        ensure_directory(&workspace_dir.join(directory))?;
+        ensure_directory(&workspace_root.join(directory))?;
     }
 
-    if !project_exists {
-        let content = toml::to_string_pretty(&ProjectConfig::default())
+    if !config_exists {
+        let content = toml::to_string_pretty(&WorkspaceConfig::default())
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        create_file_if_absent(&project_path, |file| file.write_all(content.as_bytes()))?;
+        create_file_if_absent(&config_path, |file| file.write_all(content.as_bytes()))?;
     }
     for (relative, content) in [
         ("README.md", WORKSPACE_README),
         (".gitignore", WORKSPACE_IGNORES),
     ] {
-        if create_file_if_absent(&workspace_dir.join(relative), |file| {
+        if create_file_if_absent(&workspace_root.join(relative), |file| {
             file.write_all(content.as_bytes())
         })? {
             println!("  [created] {}", relative);
@@ -124,17 +124,17 @@ pub fn run_workspace_init(path: Option<String>) -> io::Result<()> {
         }
     }
 
-    println!("\nSuccess! Multi-case project workspace skeleton is ready.");
+    println!("\nSuccess! Workspace skeleton is ready.");
     println!("Use `orev case add <name>` to create and register a case.");
     Ok(())
 }
 
-/// 核心业务函数：在指定路径初始化二进制分析案例工作区
+/// 核心业务函数：在指定路径初始化二进制分析案件
 ///
 /// # 参数
-/// - `path`: 可选的目标案例工作区路径。如果为 `None`，则使用当前进程目录。
+/// - `path`: 可选的目标案件路径。如果为 `None`，则使用当前进程目录。
 pub fn run_init(path: Option<String>) -> io::Result<()> {
-    // 1. 确定案例工作区的根目录
+    // 1. 确定案件的根目录
     let current_dir = match env::current_dir() {
         Ok(dir) => dir,
         Err(e) => {
@@ -145,39 +145,39 @@ pub fn run_init(path: Option<String>) -> io::Result<()> {
 
     //💡路径组合与解析
     // 如果用户传了 path，就用 current_dir.join(path) 拼接成绝对或相对目标路径；否则直接用当前目录。
-    let workspace_dir = match path {
+    let case_root = match path {
         Some(ref p) => current_dir.join(p),
         None => current_dir.clone(),
     };
 
-    // 如果目标案例工作区目录不存在，递归创建它
-    if let Err(e) = fs::create_dir_all(&workspace_dir) {
+    // 如果目标案件目录不存在，递归创建它
+    if let Err(e) = fs::create_dir_all(&case_root) {
         eprintln!(
             "Error: Failed to create case directory `{}`: {}",
-            workspace_dir.display(),
+            case_root.display(),
             e
         );
         return Err(e);
     }
 
     // 2. 确定新案例的默认名称
-    let case_name = workspace_dir
+    let case_name = case_root
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("binary_case")
         .to_string();
 
-    initialize_case(&workspace_dir, Config::new_case(case_name))?;
-    println!("\nSuccess! Analysis Case workspace is ready.");
+    initialize_case(&case_root, CaseConfig::new_case(case_name))?;
+    println!("\nSuccess! Analysis case is ready.");
     Ok(())
 }
 
-pub(super) fn initialize_case(workspace_dir: &Path, initial: Config) -> io::Result<()> {
+pub(super) fn initialize_case(case_root: &Path, initial: CaseConfig) -> io::Result<()> {
     println!("Initializing analysis case...");
-    println!("Case Workspace Root: {}", workspace_dir.display());
+    println!("Case Root: {}", case_root.display());
 
     // 3. 创建或验证配置文件
-    let config_path = workspace_dir.join("orev.toml");
+    let config_path = case_root.join("orev.toml");
 
     let config_created = if !existing_regular_file(&config_path)? {
         let config_content = match toml::to_string_pretty(&initial) {
@@ -202,7 +202,7 @@ pub(super) fn initialize_case(workspace_dir: &Path, initial: Config) -> io::Resu
         }
     };
 
-    let config: Config = match toml::from_str(&config_content) {
+    let config: CaseConfig = match toml::from_str(&config_content) {
         Ok(config) => config,
         Err(e) => {
             eprintln!("Error: Failed to parse orev.toml: {}", e);
@@ -218,14 +218,14 @@ pub(super) fn initialize_case(workspace_dir: &Path, initial: Config) -> io::Resu
 
     println!("Case Name: {}", config.case.name);
 
-    let store_root = match config.storage.resolve_store_root(workspace_dir) {
+    let store_root = match config.storage.resolve_store_root(case_root) {
         Ok(path) => path,
         Err(e) => {
             eprintln!("Error: Failed to resolve storage.store_root: {}", e);
             return Err(e);
         }
     };
-    let tools_root = match config.storage.resolve_tools_root(workspace_dir) {
+    let tools_root = match config.storage.resolve_tools_root(case_root) {
         Ok(path) => path,
         Err(e) => {
             eprintln!("Error: Failed to resolve storage.tools_root: {}", e);
@@ -233,11 +233,11 @@ pub(super) fn initialize_case(workspace_dir: &Path, initial: Config) -> io::Resu
         }
     };
 
-    // 4. 创建标准案例工作区子目录
-    let kb_root = config.resolve_kb_root(workspace_dir).inspect_err(|e| {
-        eprintln!("Error: Failed to resolve project knowledge base: {}", e);
+    // 4. 创建标准案件子目录
+    let kb_root = config.resolve_kb_root(case_root).inspect_err(|e| {
+        eprintln!("Error: Failed to resolve workspace knowledge base: {}", e);
     })?;
-    if config.project_root.is_none() {
+    if config.workspace_root.is_none() {
         for child in ["techniques", "signatures", "pitfalls"] {
             ensure_directory(&kb_root.join(child))?;
         }
@@ -245,7 +245,7 @@ pub(super) fn initialize_case(workspace_dir: &Path, initial: Config) -> io::Resu
     let local_dirs = ["scripts", "state", ".orev"];
 
     for dir in &local_dirs {
-        ensure_directory(&workspace_dir.join(dir))?;
+        ensure_directory(&case_root.join(dir))?;
     }
 
     for (kind, root, external) in [
@@ -276,7 +276,7 @@ pub(super) fn initialize_case(workspace_dir: &Path, initial: Config) -> io::Resu
     }
 
     // 5. 生成高层导引 CASE.md
-    let case_md_path = workspace_dir.join("CASE.md");
+    let case_md_path = case_root.join("CASE.md");
     let case_md_content = format!(
         r#"# Analysis Case: {}
 
@@ -303,7 +303,7 @@ pub(super) fn initialize_case(workspace_dir: &Path, initial: Config) -> io::Resu
 
     // 6. 初始化状态管理用文件
     for relative_path in ["state/index.yaml", "state/investigation.yaml"] {
-        let file_path = workspace_dir.join(relative_path);
+        let file_path = case_root.join(relative_path);
 
         if create_file_if_absent(&file_path, |file| file.write_all(b"[]\n"))? {
             println!("  [created] {}", relative_path);
@@ -313,8 +313,8 @@ pub(super) fn initialize_case(workspace_dir: &Path, initial: Config) -> io::Resu
     }
 
     // 7. 生成专属 .gitignore
-    let gitignore_path = workspace_dir.join(".gitignore");
-    let gitignore_content = r#"# Orev Case Workspace Ignores
+    let gitignore_path = case_root.join(".gitignore");
+    let gitignore_content = r#"# Orev Case Ignores
 .orev/
 store/
 .cache/

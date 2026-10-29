@@ -9,8 +9,12 @@ It does not modify case configuration or state ledgers.
 ```bash
 orev run -- readelf -h ./program
 orev run -- java -jar analyzer.jar ./input.bin
-orev run -- /opt/ghidra/support/analyzeHeadless /path/to/project project -import ./program
+orev run -- /opt/ghidra/support/analyzeHeadless /path/to/analysis-db analysis-db -import ./program
 ```
+
+The Ghidra database path and name belong to the analysis tool.
+They do not identify an Orev case or workspace.
+See the [glossary](../glossary.md).
 
 The tool runs in the current directory with inherited input and a pseudoterminal (PTY).
 Orev displays output live and flushes it to `output.log`.

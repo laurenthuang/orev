@@ -28,29 +28,29 @@ pub struct Cli {
 // Enum 可以定义一组互斥的变体（Variant），非常适合用来做 CLI 的子命令设计。
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// 初始化单案件工作区或多案件项目骨架
+    /// 初始化独立案件或多案件工作区骨架
     Init {
-        // 【Rust 基础概念：Option<T>】
+        // 💡Option<T>
         // Rust 没有 null。如果某个参数是可选的（用户可能传，也可能不传），
         // 必须用 Option 包裹。它有两个值：Some(T) 代表有值，None 代表没有值。
         /// 目标目录路径，不填则使用当前目录
         path: Option<String>,
 
-        /// 创建多案件项目及空案件登记表
+        /// 创建多案件工作区及空案件登记表
         #[arg(long)]
         workspace: bool,
     },
 
-    /// 管理项目中的案件
+    /// 管理工作区中的案件
     Case {
         #[command(subcommand)]
         command: CaseCommands,
     },
 
-    /// 显示当前案例或多案件项目的状态和配置信息
+    /// 显示当前案例或多案件工作区的状态和配置信息
     Status,
 
-    /// 对案例或多案件项目目录、系统环境以及外部逆向工具链进行健康诊断
+    /// 对案例或多案件工作区目录、系统环境以及外部逆向工具链进行健康诊断
     Doctor,
 
     /// 在 PTY 中执行工具并在当前目录记录输出与溯源信息（Linux）
@@ -78,7 +78,7 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum CaseCommands {
-    /// 新增案件骨架；独立案件会先转换为多案件项目
+    /// 新增案件骨架；独立案件会先转换为多案件工作区
     Add {
         /// 必填案件名称，同时用作 cases/ 下的单级目录名
         name: String,

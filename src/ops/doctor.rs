@@ -1,4 +1,4 @@
-use crate::config::WorkspaceConfig;
+use crate::config::RootConfig;
 use crate::tool::{self, Tool};
 use std::env;
 use std::ffi::OsStr;
@@ -28,8 +28,8 @@ fn report_tool(label: &str, name: &str, program: &OsStr) {
 
 /// 核心业务函数：执行 doctor 体检
 pub fn run_doctor() -> io::Result<()> {
-    println!("=== Orev Doctor: Environment & Workspace Diagnostic ===\n");
-    let current_dir = match env::current_dir() {
+    println!("=== Orev Doctor: Environment & Configuration Diagnostic ===\n");
+    let config_root = match env::current_dir() {
         Ok(dir) => dir,
         Err(e) => {
             eprintln!("Error: Failed to get current directory: {}", e);
@@ -44,7 +44,7 @@ pub fn run_doctor() -> io::Result<()> {
     println!("CPU Architecture: {}", std::env::consts::ARCH);
 
     // 1. 读取并校验配置
-    let config_path = current_dir.join("orev.toml");
+    let config_path = config_root.join("orev.toml");
     let config_content = match fs::read_to_string(&config_path) {
         Ok(content) => content,
         Err(e) => {
@@ -53,7 +53,7 @@ pub fn run_doctor() -> io::Result<()> {
         }
     };
 
-    let config = match WorkspaceConfig::parse(&config_content) {
+    let config = match RootConfig::parse(&config_content) {
         Ok(config) => config,
         Err(e) => {
             eprintln!("Error: Failed to parse `{}`: {}", config_path.display(), e);
@@ -63,14 +63,14 @@ pub fn run_doctor() -> io::Result<()> {
 
     println!("[✓] `orev.toml` configuration loaded and validated.");
 
-    let store_root = match config.storage().resolve_store_root(&current_dir) {
+    let store_root = match config.storage().resolve_store_root(&config_root) {
         Ok(path) => path,
         Err(e) => {
             eprintln!("Error: Failed to resolve storage.store_root: {}", e);
             return Err(e);
         }
     };
-    let tools_root = match config.storage().resolve_tools_root(&current_dir) {
+    let tools_root = match config.storage().resolve_tools_root(&config_root) {
         Ok(path) => path,
         Err(e) => {
             eprintln!("Error: Failed to resolve storage.tools_root: {}", e);
@@ -78,26 +78,26 @@ pub fn run_doctor() -> io::Result<()> {
         }
     };
 
-    // 2. 检查核心工作区目录
+    // 2. 检查案件或工作区目录
     let dirs = match &config {
-        WorkspaceConfig::Case(config) => {
-            let kb_root = config.resolve_kb_root(&current_dir).inspect_err(|e| {
-                eprintln!("Error: Failed to resolve project knowledge base: {}", e);
+        RootConfig::Case(config) => {
+            let kb_root = config.resolve_kb_root(&config_root).inspect_err(|e| {
+                eprintln!("Error: Failed to resolve workspace knowledge base: {}", e);
             })?;
             vec![
                 kb_root,
                 store_root,
                 tools_root,
-                current_dir.join("scripts"),
-                current_dir.join("state"),
-                current_dir.join(".orev"),
+                config_root.join("scripts"),
+                config_root.join("state"),
+                config_root.join(".orev"),
             ]
         }
-        WorkspaceConfig::Project(_) => vec![
-            current_dir.join("kb"),
+        RootConfig::Workspace(_) => vec![
+            config_root.join("kb"),
             store_root,
             tools_root,
-            current_dir.join("cases"),
+            config_root.join("cases"),
         ],
     };
 

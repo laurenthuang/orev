@@ -9,12 +9,12 @@ use std::path::{Path, PathBuf};
 // 💡自动反序列化
 // 加上 #[derive(Deserialize)] 后，serde 库会帮我们把纯文本的 TOML 文件
 // 自动转换成内存中带类型的 Rust 结构体。Debug 允许我们打印结构体。
-/// 代表 `orev.toml` 配置文件根结构
+/// 案件配置，可通过 `workspace_root` 关联工作区。
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Config {
+pub struct CaseConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project_root: Option<PathBuf>,
+    pub workspace_root: Option<PathBuf>,
     pub case: CaseInfo,
     #[serde(default)]
     pub storage: StorageConfig,
@@ -41,7 +41,7 @@ pub struct StorageConfig {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProjectConfig {
+pub struct WorkspaceConfig {
     pub workspace: WorkspaceInfo,
     #[serde(default)]
     pub storage: StorageConfig,
@@ -54,17 +54,17 @@ pub struct WorkspaceInfo {
 }
 
 #[derive(Debug)]
-pub enum WorkspaceConfig {
-    Case(Config),
-    Project(ProjectConfig),
+pub enum RootConfig {
+    Case(CaseConfig),
+    Workspace(WorkspaceConfig),
 }
 
-impl WorkspaceConfig {
+impl RootConfig {
     pub fn parse(content: &str) -> Result<Self, toml::de::Error> {
         let value: toml::Value = toml::from_str(content)?;
-        // Mixed case/project configurations must still fail strict schema validation.
+        // Mixed case/workspace configurations must still fail strict schema validation.
         if value.get("workspace").is_some() && value.get("case").is_none() {
-            toml::from_str(content).map(Self::Project)
+            toml::from_str(content).map(Self::Workspace)
         } else {
             toml::from_str(content).map(Self::Case)
         }
@@ -73,15 +73,15 @@ impl WorkspaceConfig {
     pub fn storage(&self) -> &StorageConfig {
         match self {
             Self::Case(config) => &config.storage,
-            Self::Project(config) => &config.storage,
+            Self::Workspace(config) => &config.storage,
         }
     }
 }
 
-impl Config {
+impl CaseConfig {
     pub fn new_case(name: String) -> Self {
         Self {
-            project_root: None,
+            workspace_root: None,
             case: CaseInfo {
                 name,
                 version: "0.1.0".to_string(),
@@ -92,13 +92,13 @@ impl Config {
     }
 
     pub fn resolve_kb_root(&self, case_root: &Path) -> io::Result<PathBuf> {
-        match &self.project_root {
-            Some(root) => {
-                let kb = fs::canonicalize(case_root.join(root).join("kb"))?;
+        match &self.workspace_root {
+            Some(workspace_root) => {
+                let kb = fs::canonicalize(case_root.join(workspace_root).join("kb"))?;
                 if !kb.is_dir() {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
-                        "project knowledge base must be a directory",
+                        "workspace knowledge base must be a directory",
                     ));
                 }
                 Ok(kb)
@@ -109,24 +109,24 @@ impl Config {
 }
 
 impl StorageConfig {
-    pub fn resolve_store_root(&self, case_root: &Path) -> io::Result<PathBuf> {
-        resolve_storage_root(case_root, self.store_root.as_deref(), "store")
+    pub fn resolve_store_root(&self, config_root: &Path) -> io::Result<PathBuf> {
+        resolve_storage_root(config_root, self.store_root.as_deref(), "store")
     }
 
-    pub fn resolve_tools_root(&self, case_root: &Path) -> io::Result<PathBuf> {
-        resolve_storage_root(case_root, self.tools_root.as_deref(), "tools")
+    pub fn resolve_tools_root(&self, config_root: &Path) -> io::Result<PathBuf> {
+        resolve_storage_root(config_root, self.tools_root.as_deref(), "tools")
     }
 }
 
 fn resolve_storage_root(
-    case_root: &Path,
+    config_root: &Path,
     configured: Option<&Path>,
     default_dir: &str,
 ) -> io::Result<PathBuf> {
-    let case_root = fs::canonicalize(case_root)?;
+    let config_root = fs::canonicalize(config_root)?;
 
     let Some(configured) = configured else {
-        return Ok(case_root.join(default_dir));
+        return Ok(config_root.join(default_dir));
     };
 
     if !configured.is_absolute() {
@@ -150,15 +150,61 @@ fn resolve_storage_root(
         ));
     }
 
-    if resolved.starts_with(&case_root) {
+    if resolved.starts_with(&config_root) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "configured {default_dir} root must be outside the case directory: `{}`",
+                "configured {default_dir} root must be outside the configuration root: `{}`",
                 resolved.display()
             ),
         ));
     }
 
     Ok(resolved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn root_configuration_distinguishes_cases_and_workspaces() {
+        let case = toml::to_string_pretty(&CaseConfig::new_case("analysis".into())).unwrap();
+        assert!(matches!(
+            RootConfig::parse(&case).unwrap(),
+            RootConfig::Case(_)
+        ));
+        let workspace = toml::to_string_pretty(&WorkspaceConfig::default()).unwrap();
+        assert!(matches!(
+            RootConfig::parse(&workspace).unwrap(),
+            RootConfig::Workspace(_)
+        ));
+    }
+
+    #[test]
+    fn workspace_case_round_trips_the_workspace_root_association() {
+        let mut case = CaseConfig::new_case("analysis".into());
+        case.workspace_root = Some(PathBuf::from("../.."));
+        let content = toml::to_string_pretty(&case).unwrap();
+        assert!(content.contains("workspace_root = \"../..\""));
+        assert!(!content.contains("project_root"));
+        let RootConfig::Case(parsed) = RootConfig::parse(&content).unwrap() else {
+            panic!("a workspace case must still use the case schema");
+        };
+        assert_eq!(parsed.workspace_root.as_deref(), Some(Path::new("../..")));
+        assert_eq!(parsed.case.name, "analysis");
+    }
+
+    #[test]
+    fn root_configuration_rejects_legacy_associations_and_mixed_schemas() {
+        for content in [
+            "project_root = \"../..\"\n[case]\nname = \"analysis\"\nversion = \"0.1.0\"\n",
+            "project_root = \"../..\"\nworkspace_root = \"../..\"\n[case]\nname = \"analysis\"\nversion = \"0.1.0\"\n",
+            "workspace_root = \"..\"\n[workspace]\ncases = []\n",
+            "workspace_root = \"../..\"\nworkspace_root = \"../..\"\n[case]\nname = \"analysis\"\nversion = \"0.1.0\"\n",
+            "[case]\nname = \"analysis\"\nversion = \"0.1.0\"\n[workspace]\ncases = []\n",
+        ] {
+            assert!(RootConfig::parse(content).is_err(), "{content}");
+        }
+    }
 }
