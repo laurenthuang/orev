@@ -10,7 +10,6 @@ Cargo.toml          # Rust package and dependencies
 src/
   main.rs           # Command dispatch
   cli.rs            # Clap command definitions
-  commands/         # Command adapters and output
   ops/              # Workspace and tool-run operations
     run/            # PTY, redaction, and record integrity
   config.rs         # TOML schemas and resource roots
@@ -19,7 +18,7 @@ tests/              # CLI integration tests and support/
 docs/user/          # User guides
 ```
 
-- Keep command adapters limited to calls and output. Put filesystem and execution logic in `src/ops/`.
+- Keep command dispatch and process exit handling in `src/main.rs`. Put filesystem and execution logic in `src/ops/`.
 - `WorkspaceConfig` separates `[case]` from `[workspace]`. Project cases use `project_root` and share project resources.
 - `src/ops/case.rs` reuses `src/ops/init.rs` for new cases. Keep conversion locks, symbolic link checks, and rollback.
 - `doctor` and `run` share `src/tool.rs`. Keep probe time and output limits. Read Ghidra versions from installation properties. Do not execute its launcher for version detection.

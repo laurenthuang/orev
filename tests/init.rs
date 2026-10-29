@@ -488,6 +488,25 @@ fn init_case_name_comes_from_existing_config() {
 }
 
 #[test]
+fn status_without_configuration_reports_to_stdout_and_returns_zero() {
+    let workspace = tempfile::tempdir().unwrap();
+    let output = support::orev()
+        .arg("status")
+        .current_dir(workspace.path())
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty(), "{output:?}");
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "Error: `orev.toml` not found in current directory.\n\
+Please run `orev init` for a single case project or `orev init --workspace` for a multi-case project.\n"
+    );
+    assert_eq!(fs::read_dir(workspace.path()).unwrap().count(), 0);
+}
+
+#[test]
 fn status_reports_only_case_information() {
     let workspace = tempfile::tempdir().unwrap();
     write_case_config(workspace.path());
@@ -587,6 +606,7 @@ fn status_and_doctor_reject_malformed_and_unknown_configuration_fields() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             assert!(!stdout.contains("configuration loaded and validated"));
             if command == "status" {
+                assert_eq!(output.status.code(), Some(0), "{output:?}");
                 assert!(output.stdout.is_empty(), "{output:?}");
             } else {
                 assert_eq!(output.status.code(), Some(1), "{output:?}");

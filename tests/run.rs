@@ -555,8 +555,16 @@ fn missing_tool_is_recorded_and_execution_does_not_require_script_in_path() {
             );
             continue;
         }
-        assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stderr).contains("Error:"));
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty(), "{output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            stderr
+                .lines()
+                .filter(|line| line.starts_with("Error:"))
+                .collect::<Vec<_>>(),
+            ["Error: executable `orev-test-nonexistent-tool` not found or not executable"]
+        );
         let info = metadata(&records(root.path())[0]);
         assert_eq!(info["status"].as_str(), Some("error"));
         assert!(info["error"].as_str().unwrap().contains("not found"));
