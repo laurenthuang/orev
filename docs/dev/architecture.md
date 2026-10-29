@@ -4,6 +4,7 @@ Orev is a Linux CLI that manages analysis cases and records external tool runs.
 It has no server, database, or automatic analysis pipeline.
 The filesystem holds configuration, case state, and execution records.
 Use the [canonical glossary](../glossary.md) for case, case root, workspace, workspace root, and `config_root`.
+See [Behavior contracts](behavior-contracts.md) for implementation constraints and regression requirements.
 
 ## Code dependencies
 
