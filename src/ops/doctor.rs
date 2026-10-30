@@ -76,7 +76,6 @@ pub fn run_doctor() -> io::Result<()> {
                 resources.tools.path().to_path_buf(),
                 config_root.join("scripts"),
                 config_root.join("state"),
-                config_root.join(".orev"),
             ]
         }
         RootConfig::Workspace(_) => vec![

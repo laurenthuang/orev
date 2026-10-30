@@ -68,10 +68,11 @@ Relative paths use the directory of the declaring configuration.
 For a case, it checks these directories:
 
 - The case's local or shared `kb/`, `store/`, and `tools/` roots.
-- Case-local `scripts/`, `state/`, and `.orev/`.
+- Case-local `scripts/` and `state/`.
 
 For a workspace, it checks `kb/`, `cases/`, and the configured or default `store/` and `tools/` roots.
 It does not require case-local directories at the workspace root.
+Doctor does not require `.orev/` in the case root, workspace root, or user home directory.
 Workspace checks do not inspect registered cases.
 Run doctor from each case root to check its directories and configuration.
 

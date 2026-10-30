@@ -4,7 +4,7 @@
 
 ## Sub-features
 
-- `doctor-case` checks the case's kb/store/tools roots plus `scripts/`, `state/`, and `.orev/`.
+- `doctor-case` checks the case's kb/store/tools roots plus `scripts/` and `state/`.
 - `doctor-workspace` checks `kb/`, `cases/`, `store/`, and `tools/` at a workspace root.
 - `doctor-tools` reports versions and paths for Java and binutils.
 - `doctor-ghidra` discovers Ghidra via `GHIDRA_INSTALL_DIR` or `PATH` and reads `Ghidra/application.properties`.
@@ -22,7 +22,7 @@ Preconditions:
 
 - Baseline from the README. Create `wks` with case `router-audit` as in [case-add.md](./case-add.md).
 
-- **Case.** Run `$S send "$ID" doctor-case-01 'cd /tmp/orev-verify-'"$ID"'/wks/cases/router-audit && orev doctor'`. You see `[✓] \`orev.toml\` configuration loaded and validated.`, `[✓]` lines for the workspace knowledge base at `wks/kb`, `wks/store`, `wks/tools`, and the case's `scripts`, `state`, and `.orev`, then `[✓]` tool lines with paths, and `Doctor check completed.` with `EXIT=0`.
+- **Case.** Run `$S send "$ID" doctor-case-01 'cd /tmp/orev-verify-'"$ID"'/wks/cases/router-audit && orev doctor'`. You see `[✓] \`orev.toml\` configuration loaded and validated.`, `[✓]` lines for the workspace knowledge base at `wks/kb`, `wks/store`, `wks/tools`, and the case's `scripts` and `state`, then `[✓]` tool lines with paths, and `Doctor check completed.` with `EXIT=0`.
 - **Missing dir warns.** Run `$S send "$ID" doctor-missing-01 'rmdir scripts && orev doctor; mkdir scripts'`. A `[!]` line names `scripts`, and `EXIT` is still 0 (the trailing `mkdir` restores it; check the doctor line, not `EXIT`).
 - **Missing inherited storage fails.** Run `$S send "$ID" doctor-inherit-01 'mv ../../store ../../store.saved && orev doctor'`. Doctor reports a storage error with `EXIT=1` and does not recreate `store/`. Restore it with `$S send "$ID" doctor-inherit-02 'mv ../../store.saved ../../store'`. Run this only in the scratch workspace.
 - **Bad config fails.** Run `$S send "$ID" doctor-bad-01 'cp orev.toml /tmp/orev-verify-'"$ID"'/home/ok.toml && echo "bogus = 1" >> orev.toml && orev doctor'`. You see a configuration error and `EXIT=1`. Restore it with `$S send "$ID" doctor-bad-02 'cp /tmp/orev-verify-'"$ID"'/home/ok.toml orev.toml'`.

@@ -82,8 +82,8 @@ flowchart LR
     workspace["Workspace root<br/>orev.toml / workspace.cases"]
     workspace --> kb["Shared kb/"]
     workspace --> storage["Shared store and tools roots<br/>Local defaults or configured external directories"]
-    workspace --> a["cases/router-audit/<br/>Case root with orev.toml, CASE.md, scripts/, state/, .orev/"]
-    workspace --> b["cases/firmware/<br/>Case root with orev.toml, CASE.md, scripts/, state/, .orev/"]
+    workspace --> a["cases/router-audit/<br/>Case root with orev.toml, CASE.md, scripts/, state/"]
+    workspace --> b["cases/firmware/<br/>Case root with orev.toml, CASE.md, scripts/, state/"]
     a -. "workspace_root = ../.." .-> workspace
     b -. "workspace_root = ../.." .-> workspace
     a -. "Inherits unset storage fields" .-> storage

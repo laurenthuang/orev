@@ -30,7 +30,6 @@ my-case/
 ├── .gitignore
 ├── orev.toml
 ├── CASE.md
-├── .orev/
 ├── kb/
 │   ├── techniques/
 │   ├── signatures/
@@ -45,6 +44,7 @@ my-case/
 
 Initialization does not run analysis tools or create analysis-tool databases.
 It creates an empty `scripts/` directory.
+It does not create a `.orev/` directory or change an existing `.orev` entry.
 Put case-specific scripts in `scripts/<tool>/` as needed.
 Orev does not generate or execute these scripts during initialization.
 

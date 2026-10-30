@@ -239,7 +239,7 @@ pub(super) fn initialize_case(
             ensure_directory(&kb_root.join(child))?;
         }
     }
-    let local_dirs = ["scripts", "state", ".orev"];
+    let local_dirs = ["scripts", "state"];
 
     for dir in &local_dirs {
         ensure_directory(&case_root.join(dir))?;

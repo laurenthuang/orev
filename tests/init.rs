@@ -630,6 +630,7 @@ fn status_and_doctor_reject_malformed_and_unknown_configuration_fields() {
 #[test]
 fn doctor_checks_workspace_layout_without_requiring_case_directories() {
     let workspace_root = tempfile::tempdir().unwrap();
+    let user_home = tempfile::tempdir().unwrap();
     let init = support::orev()
         .args(["init", "--workspace"])
         .current_dir(workspace_root.path())
@@ -649,6 +650,7 @@ fn doctor_checks_workspace_layout_without_requiring_case_directories() {
         let output = support::orev()
             .arg("doctor")
             .current_dir(workspace_root.path())
+            .env("HOME", user_home.path())
             .env("PATH", "")
             .env_remove("GHIDRA_INSTALL_DIR")
             .output()
@@ -675,6 +677,8 @@ fn doctor_checks_workspace_layout_without_requiring_case_directories() {
             assert!(directories.contains(&expected.as_str()), "{stdout}");
         }
         assert!(!stdout.contains("is missing."), "{stdout}");
+        assert!(!stdout.contains(".orev"), "{stdout}");
+        assert!(!user_home.path().join(".orev").exists());
         for name in ["scripts", "state", ".orev"] {
             assert!(!workspace_root.path().join(name).exists());
         }
@@ -892,7 +896,6 @@ fn init_generates_only_case_configuration_and_layout() {
     entries.sort();
     let expected: Vec<std::ffi::OsString> = [
         ".gitignore",
-        ".orev",
         "CASE.md",
         "kb",
         "orev.toml",
@@ -913,7 +916,6 @@ fn init_generates_only_case_configuration_and_layout() {
         "store",
         "tools",
         "state",
-        ".orev",
         "scripts",
     ] {
         assert!(
@@ -928,6 +930,74 @@ fn init_generates_only_case_configuration_and_layout() {
         0,
         "initialization must not generate scripts or tool-specific directories",
     );
+}
+
+#[test]
+fn init_and_reinit_do_not_create_dot_orev() {
+    for mode in ["absolute", "relative", "current"] {
+        let temp = tempfile::tempdir().unwrap();
+        let case_root = temp.path().join("case");
+        fs::create_dir(&case_root).unwrap();
+        for _ in 0..2 {
+            let mut command = support::orev();
+            command.arg("init");
+            match mode {
+                "absolute" => command.arg(&case_root),
+                "relative" => command.current_dir(temp.path()).arg("case"),
+                _ => command.current_dir(&case_root),
+            };
+            assert_success(&command.output().unwrap());
+            assert!(!case_root.join(".orev").exists(), "{mode}");
+        }
+    }
+}
+
+#[test]
+fn init_preserves_existing_dot_orev_entries() {
+    for directory in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let case_root = temp.path();
+        let entry = case_root.join(".orev");
+        let sentinel = if directory {
+            fs::create_dir(&entry).unwrap();
+            entry.join("sentinel")
+        } else {
+            entry
+        };
+        fs::write(&sentinel, b"preserve this\n").unwrap();
+
+        for _ in 0..2 {
+            let output = support::orev().arg("init").arg(case_root).output().unwrap();
+            assert_success(&output);
+            assert_eq!(fs::read(&sentinel).unwrap(), b"preserve this\n");
+        }
+    }
+}
+
+#[test]
+fn doctor_does_not_require_case_or_home_dot_orev() {
+    let temp = tempfile::tempdir().unwrap();
+    let user_home = tempfile::tempdir().unwrap();
+    let case_root = temp.path();
+    write_case_config(case_root);
+    for directory in ["kb", "store", "tools", "scripts", "state"] {
+        fs::create_dir(case_root.join(directory)).unwrap();
+    }
+
+    let output = support::orev()
+        .arg("doctor")
+        .current_dir(case_root)
+        .env("HOME", user_home.path())
+        .env("PATH", "")
+        .env_remove("GHIDRA_INSTALL_DIR")
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains(".orev"), "{stdout}");
+    assert!(!stdout.contains("is missing."), "{stdout}");
+    assert!(!case_root.join(".orev").exists());
+    assert!(!user_home.path().join(".orev").exists());
 }
 
 fn write_config_with_storage_root(case_root: &Path, field: &str, root: &Path) {
@@ -1647,7 +1717,6 @@ fn init_rejects_files_at_required_directory_paths() {
         "kb/signatures",
         "kb/pitfalls",
         "state",
-        ".orev",
         "store",
         "tools",
     ] {
@@ -1806,7 +1875,7 @@ fn init_rejects_dangling_or_wrong_type_file_symlinks() {
 fn init_rejects_dangling_or_wrong_type_directory_symlinks() {
     use std::os::unix::fs::symlink;
 
-    for relative in ["kb", "scripts", "state", ".orev", "store", "tools"] {
+    for relative in ["kb", "scripts", "state", "store", "tools"] {
         for target_file in [false, true] {
             let temp = tempfile::tempdir().expect("failed to create temporary directory");
             let case_root = temp.path().join("case");

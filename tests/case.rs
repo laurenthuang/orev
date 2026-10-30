@@ -128,6 +128,7 @@ fn assert_workspace_case(workspace_root: &Path, name: &str) {
         assert!(case_root.join(file).is_file(), "{file} must exist");
     }
     assert!(case_root.join("scripts").is_dir());
+    assert!(!case_root.join(".orev").exists());
     let output = run(&case_root, &["doctor"]);
     success(&output);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -139,6 +140,7 @@ fn assert_workspace_case(workspace_root: &Path, name: &str) {
     let output = run(&case_root, &["init"]);
     success(&output);
     assert!(!case_root.join("kb").exists());
+    assert!(!case_root.join(".orev").exists());
 }
 
 #[test]
