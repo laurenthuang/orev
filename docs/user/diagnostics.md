@@ -1,7 +1,10 @@
 # Diagnostics
 
-Run `status` and `doctor` from a case root or workspace root.
-Neither command searches parent directories for a configuration.
+Run `status` and `doctor` from a case root, workspace root, or any of their subdirectories.
+Both commands search the current directory and then its parents for the nearest `orev.toml` entry.
+They stop at that entry even if it is malformed, unreadable, or a dangling symbolic link.
+They do not skip it for a configuration farther up the directory tree.
+Inside a workspace case, both commands use the case configuration rather than selecting the workspace.
 For case creation and configuration, see [Workspaces and configuration](workspaces.md).
 
 ## Case and workspace status
@@ -10,7 +13,8 @@ For case creation and configuration, see [Workspaces and configuration](workspac
 orev status
 ```
 
-Orev reads `orev.toml` in the current directory.
+Orev reads the nearest `orev.toml`.
+The reported root is the directory containing that configuration, not the current working directory.
 For a case configuration, it shows:
 
 - Case name.
@@ -44,7 +48,7 @@ Registered Cases: 1
 An empty workspace shows a registered case count of 0.
 Status reads the registry; it does not inspect case directories or validate their contents.
 Unknown fields and malformed configurations produce errors for both configuration types.
-If `orev.toml` is missing, status prints this hint:
+If neither the current directory nor its parents contain `orev.toml`, status prints this hint:
 
 ```text
 Please run `orev init` for a standalone case or `orev init --workspace` for a workspace.
@@ -74,7 +78,7 @@ For a workspace, it checks `kb/`, `cases/`, and the configured or default `store
 It does not require case-local directories at the workspace root.
 Doctor does not require `.orev/` in the case root, workspace root, or user home directory.
 Workspace checks do not inspect registered cases.
-Run doctor from each case root to check its directories and configuration.
+Run doctor from a case root or one of its subdirectories to check that case's directories and configuration.
 
 Doctor checks Java, `objdump`, `readelf`, `strings`, `file`, Magika, Detect It Easy, and Ghidra.
 It distinguishes missing executables from version-detection failures.

@@ -511,10 +511,226 @@ fn status_without_configuration_reports_to_stdout_and_returns_zero() {
     assert!(output.stderr.is_empty(), "{output:?}");
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
-        "Error: `orev.toml` not found in current directory.\n\
+        "Error: `orev.toml` not found in current directory or its ancestors.\n\
 Please run `orev init` for a standalone case or `orev init --workspace` for a workspace.\n"
     );
     assert_eq!(fs::read_dir(config_root.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn doctor_without_configuration_reports_ancestor_search_and_fails() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = support::orev()
+        .arg("doctor")
+        .current_dir(directory.path())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("no orev.toml found in the current directory or its ancestors"),
+        "{stderr}"
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Doctor check completed."));
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn status_and_doctor_find_nearest_case_or_workspace_from_subdirectories() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path().join("workspace");
+    assert_success(
+        &support::orev()
+            .args(["init", "--workspace"])
+            .arg(&workspace)
+            .output()
+            .unwrap(),
+    );
+    assert_success(
+        &support::orev()
+            .args(["case", "add", "analysis"])
+            .current_dir(&workspace)
+            .output()
+            .unwrap(),
+    );
+    let standalone = workspace.join("standalone");
+    assert_success(
+        &support::orev()
+            .arg("init")
+            .arg(&standalone)
+            .output()
+            .unwrap(),
+    );
+
+    for (root, relative, resources, kind) in [
+        (
+            workspace.clone(),
+            "kb/techniques/nested",
+            &workspace,
+            "Workspace",
+        ),
+        (
+            workspace.join("cases/analysis"),
+            "scripts/nested",
+            &workspace,
+            "Case",
+        ),
+        (standalone.clone(), "scripts/nested", &standalone, "Case"),
+    ] {
+        let nested = root.join(relative);
+        fs::create_dir_all(&nested).unwrap();
+        let before = fs::read(root.join("orev.toml")).unwrap();
+        let status = support::orev()
+            .arg("status")
+            .current_dir(&nested)
+            .output()
+            .unwrap();
+        assert_success(&status);
+        assert!(status.stderr.is_empty(), "{status:?}");
+        let stdout = String::from_utf8_lossy(&status.stdout);
+        assert!(
+            stdout.contains(&format!("=== Orev {kind} Status ===")),
+            "{stdout}"
+        );
+        let prefix = if kind == "Case" {
+            "Case Root:       "
+        } else {
+            "Workspace Root:  "
+        };
+        assert!(
+            stdout.contains(&format!("{prefix}{}", root.display())),
+            "{stdout}"
+        );
+
+        let doctor = support::orev()
+            .arg("doctor")
+            .current_dir(&nested)
+            .env("PATH", "")
+            .env_remove("GHIDRA_INSTALL_DIR")
+            .output()
+            .unwrap();
+        assert_success(&doctor);
+        assert!(doctor.stderr.is_empty(), "{doctor:?}");
+        let stdout = String::from_utf8_lossy(&doctor.stdout);
+        assert!(
+            stdout.contains("configuration loaded and validated."),
+            "{stdout}"
+        );
+        assert!(stdout.contains("Doctor check completed."), "{stdout}");
+        assert!(!stdout.contains("is missing."), "{stdout}");
+        let mut paths = ["kb", "store", "tools"]
+            .map(|name| resources.join(name))
+            .to_vec();
+        paths.extend(if kind == "Case" {
+            vec![root.join("scripts"), root.join("state")]
+        } else {
+            vec![root.join("cases")]
+        });
+        for path in paths {
+            assert!(
+                stdout.contains(&format!("Directory `{}` exists.", path.display())),
+                "{stdout}"
+            );
+        }
+        assert_eq!(fs::read(root.join("orev.toml")).unwrap(), before);
+        assert_eq!(fs::read_dir(&nested).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn status_and_doctor_stop_at_invalid_nearest_configuration() {
+    let directory = tempfile::tempdir().unwrap();
+    assert_success(
+        &support::orev()
+            .args(["init", "--workspace"])
+            .arg(directory.path())
+            .output()
+            .unwrap(),
+    );
+    let before = fs::read(directory.path().join("orev.toml")).unwrap();
+    for kind in ["malformed", "unknown", "directory", "dangling-symlink"] {
+        let root = directory.path().join(kind);
+        let nested = root.join("nested/deep");
+        fs::create_dir_all(&nested).unwrap();
+        let path = root.join("orev.toml");
+        match kind {
+            "malformed" => fs::write(&path, "[case\n").unwrap(),
+            "unknown" => fs::write(&path, "[workspace]\ncases = []\nunknown = true\n").unwrap(),
+            "directory" => fs::create_dir(&path).unwrap(),
+            _ => std::os::unix::fs::symlink("missing.toml", &path).unwrap(),
+        }
+        for command in ["status", "doctor"] {
+            let output = support::orev()
+                .arg(command)
+                .current_dir(&nested)
+                .env("PATH", "")
+                .env_remove("GHIDRA_INSTALL_DIR")
+                .output()
+                .unwrap();
+            let expected = if matches!(kind, "malformed" | "unknown") {
+                "Error: Failed to parse"
+            } else {
+                "Error: Failed to read"
+            };
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains(expected), "{command} {kind}\n{stderr}");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(!stdout.contains("Status ==="), "{stdout}");
+            assert!(
+                !stdout.contains("configuration loaded and validated."),
+                "{stdout}"
+            );
+            assert!(!stdout.contains("Doctor check completed."), "{stdout}");
+            assert_eq!(
+                output.status.code(),
+                Some(if command == "status" { 0 } else { 1 })
+            );
+            assert_eq!(fs::read_dir(&nested).unwrap().count(), 0);
+        }
+    }
+    assert_eq!(
+        fs::read(directory.path().join("orev.toml")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn status_and_doctor_follow_valid_nearest_configuration_symlinks() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("case");
+    fs::create_dir(&root).unwrap();
+    write_case_config(directory.path());
+    std::os::unix::fs::symlink(directory.path().join("orev.toml"), root.join("orev.toml")).unwrap();
+    assert_success(&support::orev().arg("init").arg(&root).output().unwrap());
+    let nested = root.join("scripts/nested");
+    fs::create_dir(&nested).unwrap();
+    for command in ["status", "doctor"] {
+        let output = support::orev()
+            .arg(command)
+            .current_dir(&nested)
+            .env("PATH", "")
+            .env_remove("GHIDRA_INSTALL_DIR")
+            .output()
+            .unwrap();
+        assert_success(&output);
+        assert!(output.stderr.is_empty(), "{output:?}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if command == "status" {
+            assert!(
+                stdout.contains(&format!("Case Root:       {}", root.display())),
+                "{stdout}"
+            );
+        } else {
+            assert!(
+                stdout.contains(&format!(
+                    "Directory `{}` exists.",
+                    root.join("kb").display()
+                )),
+                "{stdout}"
+            );
+            assert!(!stdout.contains("is missing."), "{stdout}");
+        }
+    }
 }
 
 #[test]
@@ -1160,7 +1376,7 @@ fn workspace_reinit_uses_declared_relative_storage_without_creating_local_fallba
             assert!(workspace.join("cases").is_dir());
             assert!(workspace.join("kb").is_dir());
             let doctor = support::orev()
-                .current_dir(&workspace)
+                .current_dir(workspace.join("kb"))
                 .arg("doctor")
                 .env("PATH", "")
                 .env_remove("GHIDRA_INSTALL_DIR")

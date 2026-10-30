@@ -101,6 +101,26 @@ impl ResolvedResources {
     }
 }
 
+pub fn find_config_root(start: &Path) -> io::Result<PathBuf> {
+    for root in start.ancestors() {
+        let path = root.join("orev.toml");
+        match fs::symlink_metadata(&path) {
+            Ok(_) => return Ok(root.to_path_buf()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("Failed to inspect `{}`: {error}", path.display()),
+                ));
+            }
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "no orev.toml found in the current directory or its ancestors",
+    ))
+}
+
 impl RootConfig {
     pub fn parse(content: &str) -> Result<Self, toml::de::Error> {
         let value: toml::Value = toml::from_str(content)?;

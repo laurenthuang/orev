@@ -64,7 +64,8 @@ Install Git before you clone the repository.
 
 Initialization creates directories and guide files.
 It does not run analysis tools.
-Run `status` and `doctor` from a case root for case details, or a workspace root for shared resources.
+Run `status` and `doctor` from a case or workspace root, or any subdirectory.
+Both commands find the nearest `orev.toml` in the current directory or its parents.
 See [Diagnostics](docs/user/diagnostics.md) for warnings and exit-status limits.
 
 ### Create a workspace with multiple cases

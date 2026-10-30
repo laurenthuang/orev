@@ -1,4 +1,4 @@
-use crate::config::{RootConfig, WorkspaceConfig, WorkspaceContext};
+use crate::config::{RootConfig, WorkspaceConfig, WorkspaceContext, find_config_root};
 use crate::ops::case::{read_config, validate_name};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
@@ -177,46 +177,35 @@ fn resolve_case(case_name: Option<&str>) -> io::Result<PathBuf> {
     if let Some(name) = case_name {
         validate_name(name)?;
     }
-    let cwd = env::current_dir()?;
-    for root in cwd.ancestors() {
-        match fs::symlink_metadata(root.join("orev.toml")) {
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error),
-        }
-        return match parse_config(root)? {
-            RootConfig::Case(config) => {
-                if let Some(name) = case_name {
-                    if let Some(workspace_root) = &config.workspace_root {
-                        let workspace_root = fs::canonicalize(root.join(workspace_root))?;
-                        let RootConfig::Workspace(workspace) = parse_config(&workspace_root)?
-                        else {
-                            return Err(invalid(
-                                "workspace_root must point to a workspace configuration",
-                            ));
-                        };
-                        return named_workspace_case(&workspace_root, &workspace, name);
-                    }
-                    if config.case.name != name {
-                        return Err(invalid(format!(
-                            "standalone case is named `{}`, not `{name}`",
-                            config.case.name
-                        )));
-                    }
+    let root = find_config_root(&env::current_dir()?)?;
+    match parse_config(&root)? {
+        RootConfig::Case(config) => {
+            if let Some(name) = case_name {
+                if let Some(workspace_root) = &config.workspace_root {
+                    let workspace_root = fs::canonicalize(root.join(workspace_root))?;
+                    let RootConfig::Workspace(workspace) = parse_config(&workspace_root)? else {
+                        return Err(invalid(
+                            "workspace_root must point to a workspace configuration",
+                        ));
+                    };
+                    return named_workspace_case(&workspace_root, &workspace, name);
                 }
-                config.resolve_resources(root, None)?;
-                fs::canonicalize(root)
+                if config.case.name != name {
+                    return Err(invalid(format!(
+                        "standalone case is named `{}`, not `{name}`",
+                        config.case.name
+                    )));
+                }
             }
-            RootConfig::Workspace(workspace) => {
-                let name = case_name
-                    .ok_or_else(|| invalid("sample ingest requires a case, not a workspace"))?;
-                named_workspace_case(root, &workspace, name)
-            }
-        };
+            config.resolve_resources(&root, None)?;
+            fs::canonicalize(root)
+        }
+        RootConfig::Workspace(workspace) => {
+            let name = case_name
+                .ok_or_else(|| invalid("sample ingest requires a case, not a workspace"))?;
+            named_workspace_case(&root, &workspace, name)
+        }
     }
-    Err(invalid(
-        "no orev.toml found in the current directory or its ancestors",
-    ))
 }
 
 fn regular_metadata(path: &Path) -> io::Result<Metadata> {

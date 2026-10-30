@@ -1,4 +1,4 @@
-use crate::config::RootConfig;
+use crate::config::{RootConfig, find_config_root};
 use crate::tool::{self, Tool};
 use std::env;
 use std::ffi::OsStr;
@@ -29,7 +29,7 @@ fn report_tool(label: &str, name: &str, program: &OsStr) {
 /// 核心业务函数：执行 doctor 体检
 pub fn run_doctor() -> io::Result<()> {
     println!("=== Orev Doctor: Environment & Configuration Diagnostic ===\n");
-    let config_root = match env::current_dir() {
+    let current_dir = match env::current_dir() {
         Ok(dir) => dir,
         Err(e) => {
             eprintln!("Error: Failed to get current directory: {}", e);
@@ -44,6 +44,8 @@ pub fn run_doctor() -> io::Result<()> {
     println!("CPU Architecture: {}", std::env::consts::ARCH);
 
     // 1. 读取并校验配置
+    let config_root = find_config_root(&current_dir)
+        .inspect_err(|error| eprintln!("Error: Failed to locate `orev.toml`: {error}"))?;
     let config_path = config_root.join("orev.toml");
     let config_content = match fs::read_to_string(&config_path) {
         Ok(content) => content,

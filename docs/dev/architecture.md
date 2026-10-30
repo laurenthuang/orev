@@ -66,6 +66,11 @@ It works in any current directory without `orev.toml`.
 `doctor` and `run` use the same executable discovery and version rules in `tool.rs`.
 Ghidra version detection reads installation properties instead of executing its launcher.
 `sample` reuses case-name and configuration-file validation from `case`.
+`case add`, `sample ingest`, `status`, and `doctor` share `config::find_config_root` for ancestor lookup.
+The helper returns the directory containing the nearest `orev.toml` entry without reading or validating it.
+Each caller applies its own parsing and root-selection rules.
+Diagnostics stay at the nearest case or workspace root; case addition can select the case's associated workspace.
+Malformed or unreadable nearest entries stop the operation instead of allowing fallback to an ancestor configuration.
 
 ## Case and workspace resources
 

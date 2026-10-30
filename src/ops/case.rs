@@ -1,5 +1,6 @@
 use crate::config::{
     CaseConfig, RootConfig, StorageConfig, WorkspaceConfig, WorkspaceContext, WorkspaceInfo,
+    find_config_root,
 };
 use crate::ops::init::{WORKSPACE_IGNORES, WORKSPACE_README, initialize_case};
 use std::env;
@@ -69,25 +70,15 @@ pub(super) fn read_config(config_root: &Path) -> io::Result<String> {
 }
 
 fn discover(start: &Path) -> io::Result<PathBuf> {
-    for config_root in start.ancestors() {
-        match fs::symlink_metadata(config_root.join("orev.toml")) {
-            Ok(_) => {
-                let text = read_config(config_root)?;
-                return match RootConfig::parse(&text).map_err(invalid_data)? {
-                    RootConfig::Workspace(_) => Ok(config_root.to_path_buf()),
-                    RootConfig::Case(config) => match config.workspace_root {
-                        Some(workspace_root) => fs::canonicalize(config_root.join(workspace_root)),
-                        None => Ok(config_root.to_path_buf()),
-                    },
-                };
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
+    let config_root = find_config_root(start)?;
+    let text = read_config(&config_root)?;
+    match RootConfig::parse(&text).map_err(invalid_data)? {
+        RootConfig::Workspace(_) => Ok(config_root),
+        RootConfig::Case(config) => match config.workspace_root {
+            Some(workspace_root) => fs::canonicalize(config_root.join(workspace_root)),
+            None => Ok(config_root),
+        },
     }
-    Err(invalid(
-        "no orev.toml found in the current directory or its ancestors",
-    ))
 }
 
 fn invalid_data(error: impl std::fmt::Display) -> io::Error {

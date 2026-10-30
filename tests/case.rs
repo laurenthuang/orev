@@ -52,7 +52,7 @@ fn set_storage(config_root: &Path, roots: &[(&str, &Path)]) {
 }
 
 fn assert_effective_roots(case_root: &Path, store: &Path, tools: &Path) {
-    let output = run(case_root, &["doctor"]);
+    let output = run(&case_root.join("state"), &["doctor"]);
     success(&output);
     let stdout = String::from_utf8_lossy(&output.stdout);
     for path in [store, tools] {
