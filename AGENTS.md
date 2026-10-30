@@ -33,6 +33,10 @@ For case-management changes, run `cargo test --test case`.
 - Use [CLI verification](./.agents/skills/verify-orev/SKILL.md) for real-terminal checks and [redaction verification](./.agents/skills/verify-redaction/SKILL.md) for bounded-exhaustive checks.
 - Do not add generated `Cargo.lock` to version control.
 
+## Git workflow
+
+Do not create a branch or open a pull request without the user's explicit confirmation.
+
 ## Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) titles: `<type>[(scope)][!]: <description>`.

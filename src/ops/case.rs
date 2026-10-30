@@ -42,7 +42,7 @@ fn is_shared_entry(filename: &std::ffi::OsStr) -> bool {
     .any(|reserved| filename == OsStr::new(reserved))
 }
 
-fn validate_name(name: &str) -> io::Result<()> {
+pub(super) fn validate_name(name: &str) -> io::Result<()> {
     if name.trim().is_empty()
         || matches!(name, "." | "..")
         || name
@@ -56,7 +56,7 @@ fn validate_name(name: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn read_config(config_root: &Path) -> io::Result<String> {
+pub(super) fn read_config(config_root: &Path) -> io::Result<String> {
     let path = config_root.join("orev.toml");
     let metadata = fs::symlink_metadata(&path)?;
     if !metadata.file_type().is_file() {

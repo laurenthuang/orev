@@ -195,6 +195,166 @@ If rollback cannot finish, the error identifies the retained recovery data.
 Orev does not automatically recover from abrupt termination or power loss.
 Inspect any retained lock and staging directory before you retry.
 
+## Ingest samples into a case
+
+```bash
+orev sample ingest ./firmware.bin ./tree
+orev sample ingest --case firmware ./firmware.bin ./tree
+orev sample ingest -- "./capture with spaces.bin" ./another-directory
+```
+
+The command requires at least one source path.
+Use `--` before a source name that starts with `-`.
+Relative source paths use the current directory.
+Orev copies each source into `00_intake/<source-basename>` at the case root.
+Paths such as `.` and `..` use the resolved directory's basename.
+It does not move the originals or merge directories.
+Hidden files and empty directories are included.
+
+Orev searches upward from the current directory for the nearest `orev.toml`.
+Without `--case`, that configuration must describe a case, including a case associated with a workspace.
+A workspace case uses its own intake, not the workspace root.
+An invalid nearest configuration or missing configuration causes an error.
+Orev validates the case's resource configuration before it creates intake files.
+
+Use `--case <NAME>` to select a registered case from a workspace root or any of its subdirectories.
+From a workspace case, the option selects from that case's associated workspace, including sibling cases.
+The name must be a single case name, not a path.
+Orev uses `cases/<NAME>`, validates its case configuration and workspace association, and rejects symlinked case directories.
+An unregistered name causes an error, even if a directory with that name exists.
+For a standalone case, the name must match its configured case name.
+The option never creates or converts cases.
+Without `--case`, running from a workspace root still causes an error.
+Relative source paths continue to use the invocation directory, not the selected case directory.
+The option does not add source paths or absolute paths to metadata.
+
+The resulting layout is:
+
+```text
+my-case/
+├── orev.toml
+└── 00_intake/
+    ├── stage.yaml
+    ├── firmware.bin
+    └── tree/
+        ├── empty/
+        └── readme.txt
+```
+
+### Intake metadata
+
+`stage.yaml` is one YAML sequence for the entire intake.
+Each successful invocation appends its samples in argument order.
+Previous metadata values and copied artifacts remain unchanged.
+Orev can rewrite YAML formatting when it appends.
+
+Each sample has these fields:
+
+- `kind` is `file` or `directory`.
+- `stored_path` is the sample's name relative to `00_intake`.
+- `byte_size` is the file size, or the sum of all descendant file sizes.
+- `ingested_at` is the UTC ingestion timestamp in RFC 3339 format.
+- `sha256` is the lowercase hexadecimal SHA-256 digest.
+- `source_modified_at` is the source root's UTC modification timestamp.
+- `entries` exists only for directories. It lists every descendant file and directory in sorted path order, including empty directories.
+
+Each directory entry has a `kind` and a `path`.
+File entries also have `byte_size` and `sha256`.
+Every metadata path is relative to `00_intake`, including descendant paths such as `tree/readme.txt`.
+Metadata does not record the original source path, its parent directories, or absolute paths.
+File contents can still contain that information. Ingestion does not redact copied bytes.
+
+For example, if both files contain the three bytes `abc`, the manifest has this shape:
+
+```yaml
+- kind: file
+  stored_path: firmware.bin
+  byte_size: 3
+  ingested_at: '2026-10-30T01:00:00Z'
+  sha256: ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+  source_modified_at: '2026-10-29T12:00:00Z'
+- kind: directory
+  stored_path: tree
+  byte_size: 3
+  ingested_at: '2026-10-30T01:00:00Z'
+  sha256: c031d2f20b0085f549081c4d1459f778bb96fa4ff812427a51c888bf26bb0efa
+  source_modified_at: '2026-10-29T12:00:00Z'
+  entries:
+  - kind: directory
+    path: tree/empty
+  - kind: file
+    path: tree/readme.txt
+    byte_size: 3
+    sha256: ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+```
+
+### Directory digest format
+
+Plain files use SHA-256 over their copied contents.
+Directory digests use SHA-256 over this exact binary stream:
+
+1. Start with the ASCII bytes `orev-directory-sha256-v1` followed by one NUL byte.
+2. Remove the sample's `stored_path` and the following `/` from each descendant metadata path.
+   The remaining paths use UTF-8 bytes and `/` separators.
+3. Sort those paths lexicographically by unsigned UTF-8 bytes.
+   Include all descendant directories and files. Do not include the sample root itself.
+4. For each directory, append ASCII `D`, its path's byte length as an unsigned 64-bit big-endian integer, and the path bytes.
+5. For each file, append ASCII `F`, its path's byte length as an unsigned 64-bit big-endian integer, and the path bytes.
+   Then append its copied byte size as an unsigned 64-bit big-endian integer and its 32 raw SHA-256 digest bytes.
+
+There are no other separators, terminators, or entry counts.
+An empty directory sample hashes only the versioned prefix.
+Its digest is `aa6bb224f441e6de667f18b30de3e6d04f3724dc49def8ff903c522b3bc64a91`.
+Empty descendant directories contribute their own directory entries.
+The root basename, timestamps, permissions, source location, and argument order do not affect a directory digest.
+
+### Input and collision rules
+
+Ingestion accepts regular files and directories with UTF-8 paths.
+It rejects symlinks, including symlinked source ancestors and directory contents.
+Special files, including FIFOs and sockets, are unsupported.
+The command rejects non-UTF-8 paths before publishing samples.
+Copied directories use mode `0700`. Copied files and the manifest use mode `0600`.
+Orev does not preserve executable permissions or other source filesystem attributes.
+
+These conditions cause an error:
+
+- A missing source or a source without a basename.
+- Two arguments with the same basename.
+- A basename of `stage.yaml` or one that starts with the reserved scratch prefix `.orev-ingest-`.
+- Any existing destination entry, including an empty directory or a dangling symlink.
+- A symlink or wrong path type at `00_intake` or `00_intake/stage.yaml`.
+- A source inside `00_intake`, or a directory source that contains `00_intake`.
+- Invalid existing metadata, including unknown fields, unsafe paths, duplicates, inconsistent sizes or digests, and mismatches with stored artifacts.
+
+Orev rehashes existing recorded artifacts before it appends.
+Deleting or changing an earlier artifact blocks later ingestion.
+Missing input in a mixed batch prevents every sample in that invocation from being published.
+Distinct basenames can be ingested in later invocations.
+
+### Publication and failure limits
+
+Cooperative ingests wait for an exclusive lock on the actual intake directory.
+Orev stages copies and the next manifest in a private `.orev-ingest-*` directory inside `00_intake`.
+It hashes copied bytes with bounded file-content memory, synchronizes staged files, and publishes samples without replacing existing paths.
+After the samples reach their destinations, Orev atomically replaces the owned manifest.
+
+A handled failure before manifest publication rolls back this invocation's published samples and removes its staging data.
+It preserves previous manifest bytes and earlier artifacts.
+Cleanup failures are reported with the affected paths.
+An empty intake directory can remain after a failed first invocation.
+If final synchronization or cleanup fails after manifest publication, Orev reports that ingestion committed rather than deleting recorded samples.
+
+Keep sources quiescent during ingestion.
+Orev checks source identity, size, modification times, and directory membership for obvious changes.
+Those checks do not provide snapshot isolation.
+The lock coordinates Orev ingests, not arbitrary filesystem writers.
+
+Ingestion is not a crash-atomic multi-file transaction.
+Abrupt termination can leave staging data or published samples that the old manifest does not list.
+After a crash, inspect those paths before you retry.
+Orev does not adopt, overwrite, or recover them automatically.
+
 ## Configuration
 
 TOML is the configuration format.

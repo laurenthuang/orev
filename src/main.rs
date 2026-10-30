@@ -7,7 +7,7 @@ mod ops;
 mod tool;
 
 use clap::Parser;
-use cli::{CaseCommands, Cli, Commands};
+use cli::{CaseCommands, Cli, Commands, SampleCommands};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -15,6 +15,9 @@ fn main() -> ExitCode {
         Commands::Case {
             command: CaseCommands::Add { name },
         } => ops::case::run_add(&name),
+        Commands::Sample {
+            command: SampleCommands::Ingest { paths, case },
+        } => ops::sample::run_ingest(&paths, case.as_deref()),
         Commands::Init { path, workspace } => {
             if workspace {
                 ops::init::run_workspace_init(path)

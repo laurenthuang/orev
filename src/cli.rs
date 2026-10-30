@@ -1,6 +1,7 @@
 // src/cli.rs
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 // ==========================================================
 // 顶层命令行参数结构体
@@ -47,6 +48,12 @@ pub enum Commands {
         command: CaseCommands,
     },
 
+    /// 将样本复制到案件根目录下的 00_intake 子目录
+    Sample {
+        #[command(subcommand)]
+        command: SampleCommands,
+    },
+
     /// 显示当前案例或多案件工作区的状态和配置信息
     Status,
 
@@ -82,5 +89,19 @@ pub enum CaseCommands {
     Add {
         /// 必填案件名称，同时用作 cases/ 下的单级目录名
         name: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SampleCommands {
+    /// 将文件和目录复制到 00_intake，并记录其 SHA-256
+    Ingest {
+        /// 指定案件名称；省略时使用最近的案件
+        #[arg(long, value_name = "NAME")]
+        case: Option<String>,
+
+        /// 源文件和目录；名称以 - 开头时，请在其前使用 --
+        #[arg(required = true, num_args = 1..)]
+        paths: Vec<PathBuf>,
     },
 }

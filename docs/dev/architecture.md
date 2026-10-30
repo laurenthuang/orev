@@ -20,6 +20,7 @@ flowchart TD
     subgraph operations["ops/"]
         init["init.rs<br/>Initialize case or workspace"]
         case["case.rs<br/>Discover, lock, convert, register"]
+        sample["sample.rs<br/>Resolve case, copy samples, publish intake metadata"]
         status["status.rs<br/>Read case or registry status"]
         doctor["doctor.rs<br/>Check configuration and tools"]
         run["run.rs<br/>Record and finalize tool execution"]
@@ -27,14 +28,17 @@ flowchart TD
 
     main --> init
     main --> case
+    main --> sample
     main --> status
     main --> doctor
     main --> run
     case --> init
+    sample --> case
 
     config["config.rs<br/>Strict TOML schemas and resource roots"]
     init --> config
     case --> config
+    sample --> config
     status --> config
     doctor --> config
 
@@ -61,6 +65,7 @@ flowchart TD
 It works in any current directory without `orev.toml`.
 `doctor` and `run` use the same executable discovery and version rules in `tool.rs`.
 Ghidra version detection reads installation properties instead of executing its launcher.
+`sample` reuses case-name and configuration-file validation from `case`.
 
 ## Case and workspace resources
 
