@@ -56,6 +56,9 @@ fn doctor_and_run_share_version_detection_and_ghidra_does_not_execute() {
         ("objdump", "--version"),
         ("readelf", "--version"),
         ("strings", "--version"),
+        ("file", "--version"),
+        ("magika", "--version"),
+        ("diec", "--version"),
     ] {
         fixture(
             root.path(),
@@ -84,7 +87,9 @@ fn doctor_and_run_share_version_detection_and_ghidra_does_not_execute() {
         .unwrap();
     success(&output);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    for name in ["java", "objdump", "readelf", "strings"] {
+    for name in [
+        "java", "objdump", "readelf", "strings", "file", "magika", "diec",
+    ] {
         assert!(
             stdout.contains(&format!("{name} shared-version")),
             "{stdout}"
@@ -115,6 +120,55 @@ fn doctor_and_run_share_version_detection_and_ghidra_does_not_execute() {
     success(&output);
     assert!(String::from_utf8_lossy(&output.stdout).contains("[✓] Ghidra: 12.2"));
     assert!(!root.path().join("should-not-execute").exists());
+}
+
+#[test]
+fn doctor_reports_magika_missing_or_unusable_as_optional_tool_warnings() {
+    let root = tempfile::tempdir().unwrap();
+    success(&orev(root.path()).arg("init").output().unwrap());
+    fs::create_dir(root.path().join("bin")).unwrap();
+    for (body, mode, diagnostic) in [
+        (
+            None,
+            0o755,
+            "executable `magika` not found or not executable",
+        ),
+        (
+            Some("printf 'magika 1.0.0\\n'"),
+            0o644,
+            "executable `magika` not found or not executable",
+        ),
+        (
+            Some("exit 7"),
+            0o755,
+            "version unknown: version probe exited with exit status: 7",
+        ),
+        (
+            Some("exit 0"),
+            0o755,
+            "version unknown: version probe produced no version text",
+        ),
+    ] {
+        if let Some(body) = body {
+            let path = fixture(root.path(), "magika", body);
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+        }
+        let output = orev(root.path())
+            .arg("doctor")
+            .env("PATH", root.path().join("bin"))
+            .env_remove("GHIDRA_INSTALL_DIR")
+            .output()
+            .unwrap();
+        success(&output);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let line = stdout
+            .lines()
+            .find(|line| line.starts_with("[!] magika:"))
+            .unwrap_or_else(|| panic!("missing Magika warning:\n{stdout}"));
+        assert!(line.contains(diagnostic), "{line}");
+        assert!(!stdout.contains("[✓] magika:"), "{stdout}");
+        assert!(stdout.contains("Doctor check completed."), "{stdout}");
+    }
 }
 
 #[test]
@@ -150,12 +204,16 @@ fn doctor_reports_probe_failures_instead_of_claiming_tools_are_missing() {
         stdout.contains("[!] strings: executable `strings` not found"),
         "{stdout}"
     );
+    assert!(
+        stdout.contains("[!] file: executable `file` not found"),
+        "{stdout}"
+    );
 }
 
 fn wait_for_log(directory: &Path, text: &str) -> String {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        let log = fs::read_to_string(directory.join("output.log")).unwrap();
+        let log = fs::read_to_string(directory.join("output.txt")).unwrap();
         if log.contains(text) {
             return log;
         }
@@ -201,7 +259,7 @@ fn metadata_and_logs_redact_current_username_components_without_changing_executi
     let directory = &records(&cwd)[0];
     let info = metadata(directory);
     let raw = fs::read_to_string(directory.join("metadata.yaml")).unwrap();
-    let log = fs::read_to_string(directory.join("output.log")).unwrap();
+    let log = fs::read_to_string(directory.join("output.txt")).unwrap();
     assert!(!raw.contains(&format!("/{user}/")), "{raw}");
     assert!(!log.contains(&format!("/{user}/")), "{log}");
     assert!(
@@ -311,7 +369,8 @@ fn run_preserves_arguments_and_captures_both_streams_without_configuration() {
     assert!(timestamp.ends_with('Z'));
     assert_eq!(timestamp.len(), 16);
     chrono::NaiveDateTime::parse_from_str(timestamp, "%Y%m%dT%H%M%SZ").unwrap();
-    let log = fs::read_to_string(directory.join("output.log")).unwrap();
+    let log = fs::read_to_string(directory.join("output.txt")).unwrap();
+    assert!(!directory.join("output.log").exists());
     assert!(log.contains(&terminal));
     let info = metadata(directory);
     assert!(info.get("schema").is_none());
@@ -333,7 +392,7 @@ fn run_preserves_arguments_and_captures_both_streams_without_configuration() {
         0o700
     );
     assert_eq!(
-        fs::metadata(directory.join("output.log"))
+        fs::metadata(directory.join("output.txt"))
             .unwrap()
             .permissions()
             .mode()
@@ -531,7 +590,7 @@ fn large_output_is_streamed_without_truncating_the_transcript() {
     let terminal = String::from_utf8(output.stdout).unwrap();
     assert_eq!(terminal.matches("0123456789abcdefghij\r\n").count(), 6000);
     assert!(terminal.ends_with("END\r\n"));
-    let log = fs::read_to_string(records(root.path())[0].join("output.log")).unwrap();
+    let log = fs::read_to_string(records(root.path())[0].join("output.txt")).unwrap();
     assert!(log.contains(&terminal));
 }
 
@@ -615,7 +674,7 @@ fn known_tools_use_their_own_version_arguments_and_stderr_is_supported() {
         );
         assert_eq!(info["tool"]["version_status"].as_str(), Some("detected"));
         assert!(
-            !fs::read_to_string(directory.join("output.log"))
+            !fs::read_to_string(directory.join("output.txt"))
                 .unwrap()
                 .contains("fixture 2.0")
         );
@@ -902,10 +961,10 @@ fn record_integrity_failures_warn_while_silent_tools_continue_and_preserve_exit_
         wait_for_log(&directory, "ready");
         let moved = root.path().join("moved-records");
         match changed {
-            "deleted-log" => fs::remove_file(directory.join("output.log")).unwrap(),
+            "deleted-log" => fs::remove_file(directory.join("output.txt")).unwrap(),
             "replaced-log" => {
-                fs::rename(directory.join("output.log"), directory.join("original.log")).unwrap();
-                fs::write(directory.join("output.log"), b"replacement").unwrap();
+                fs::rename(directory.join("output.txt"), directory.join("original.txt")).unwrap();
+                fs::write(directory.join("output.txt"), b"replacement").unwrap();
             }
             "replaced-metadata" => {
                 fs::rename(
@@ -942,9 +1001,9 @@ fn record_integrity_failures_warn_while_silent_tools_continue_and_preserve_exit_
         assert_eq!(info["status"].as_str(), Some("error"));
         assert!(info["error"].as_str().unwrap().contains("integrity lost"));
         match changed {
-            "deleted-log" => assert!(!directory.join("output.log").exists()),
+            "deleted-log" => assert!(!directory.join("output.txt").exists()),
             "replaced-log" => assert_eq!(
-                fs::read(directory.join("output.log")).unwrap(),
+                fs::read(directory.join("output.txt")).unwrap(),
                 b"replacement"
             ),
             _ => assert_eq!(
@@ -999,7 +1058,7 @@ fn pty_ctrl_c_reaches_tool_and_finalizes_metadata() {
     let info = metadata(&records(root.path())[0]);
     assert_eq!(info["exit_code"].as_i64(), Some(130));
     assert_eq!(info["status"].as_str(), Some("failed"));
-    let log = fs::read_to_string(records(root.path())[0].join("output.log")).unwrap();
+    let log = fs::read_to_string(records(root.path())[0].join("output.txt")).unwrap();
     assert!(log.contains("/tmp/<user>/READY>"));
     assert!(!log.contains(&format!("/{}/", current_username())));
 }

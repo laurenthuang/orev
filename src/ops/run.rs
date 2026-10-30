@@ -82,7 +82,7 @@ pub fn execute(argv: &[OsString], version: Option<String>, skip_probe: bool) -> 
     );
     let directory = create_run_directory(&cwd, &directory_name)?;
     let mut metadata_file = create_record(&directory.join("metadata.yaml"))?;
-    let log_path = directory.join("output.log");
+    let log_path = directory.join("output.txt");
     let mut output_file = create_record(&log_path)?;
     let mut metadata = Metadata {
         username,

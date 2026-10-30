@@ -7,7 +7,7 @@ description: Bounded-exhaustive verification that orev's username-path redaction
 
 **Property.** For every byte stream and every way it is cut into `write` calls, `UsernameRedactor` produces exactly the output of the documented rule. The rule splits the stream at boundary bytes. A token equal to the account name becomes `<user>` when it is followed by `/`, or when it is preceded by `/` and followed by a boundary or the end of the stream.
 
-**Harm if broken.** `orev run` records (`output.log`, `metadata.yaml`) would leak the analyst's account name in paths, or would corrupt unrelated text. The PTY splits output at arbitrary points, so a chunk-boundary bug appears only on some runs.
+**Harm if broken.** `orev run` records (`output.txt`, `metadata.yaml`) would leak the analyst's account name in paths, or would corrupt unrelated text. The PTY splits output at arbitrary points, so a chunk-boundary bug appears only on some runs.
 
 ## Run it
 

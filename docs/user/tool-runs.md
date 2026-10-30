@@ -17,7 +17,7 @@ They do not identify an Orev case or workspace.
 See the [glossary](../glossary.md).
 
 The tool runs in the current directory with inherited input and a pseudoterminal (PTY).
-Orev displays output live and flushes it to `output.log`.
+Orev displays output live and flushes it to `output.txt`.
 Standard output and standard error form one terminal stream.
 
 Orev supports interactive input, colors, Ctrl-C, and terminal resize.
@@ -91,7 +91,7 @@ For example:
 
 ```text
 readelf-20261028T011025Z/
-├── output.log
+├── output.txt
 └── metadata.yaml
 ```
 
@@ -104,7 +104,7 @@ Orev creates directories with mode `0700` and files with mode `0600`.
 
 ### Terminal transcript
 
-`output.log` contains terminal output after username-path redaction.
+`output.txt` contains terminal output after username-path redaction.
 It includes ANSI sequences, control characters, and PTY line endings.
 It has no session header or trailer.
 Commands, times, and exit status belong in the metadata.
@@ -208,6 +208,8 @@ Restore local paths yourself before you replay a recorded command.
 | GNU `objdump`, `readelf`, `strings`, including cross-prefixed names | `--version` |
 | GDB, including cross-prefixed names | `--version` |
 | LLDB, binwalk, file, Python, QEMU | `--version` |
+| Magika (`magika`, from the Rust `magika-cli` package) | `--version` |
+| Detect It Easy console (`diec`; `die` is the GUI and is not probed) | `--version` |
 | Ghidra, analyzeHeadless | Read `application.version` from the installation's `Ghidra/application.properties`. |
 
 Ghidra detection follows launcher symbolic links.

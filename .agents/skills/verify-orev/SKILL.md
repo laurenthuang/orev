@@ -83,7 +83,7 @@ $S keep "$ID" wks/cases/router-audit/cat-20261029T024655Z   # path relative to s
 Proof standards:
 
 - Drive the real user path, meaning the `orev` binary in a terminal. Do not call Rust functions or edit `orev.toml` by hand to set up a state the CLI should create.
-- Capture the action and the resulting state. Pair each command transcript with a read-only second look at disk, such as `ls -la`, `stat -c '%a %n'`, `cat orev.toml`, `cat <record>/metadata.yaml`, or `cat -v <record>/output.log`.
+- Capture the action and the resulting state. Pair each command transcript with a read-only second look at disk, such as `ls -la`, `stat -c '%a %n'`, `cat orev.toml`, `cat <record>/metadata.yaml`, or `cat -v <record>/output.txt`.
 - Check side effects as well as output. Look at created directories, registry entries in `[workspace].cases`, record directories, file modes, and the redacted log. A `Success!` line alone is not proof.
 - `orev status` can print a configuration error and still exit 0. Its exit code proves nothing. Assert on its text.
 - Do not use mocks. Use real tools for `run` (`cat`, `sh`, `sleep`, `readelf`). Fake Ghidra and fake tools (see [features/doctor.md](features/doctor.md)) are acceptable only to reach a branch that needs a specific install layout, and the report must say so.

@@ -75,10 +75,23 @@ It does not require case-local directories at the workspace root.
 Workspace checks do not inspect registered cases.
 Run doctor from each case root to check its directories and configuration.
 
-Doctor checks Java, `objdump`, `readelf`, `strings`, and Ghidra.
+Doctor checks Java, `objdump`, `readelf`, `strings`, `file`, Magika, Detect It Easy, and Ghidra.
 It distinguishes missing executables from version-detection failures.
 It accepts version output on standard output or standard error.
 See [Version detection](tool-runs.md#version-detection) for the shared detection rules.
+
+### Magika discovery
+
+Doctor searches `PATH` for `magika` and probes it with `--version`.
+Google's Rust CLI package is named `magika-cli`, but its executable is named `magika`.
+Missing executables and failed version probes produce optional-tool warnings.
+Doctor does not classify files or download models.
+
+### Detect It Easy discovery
+
+Doctor searches `PATH` for the console executable `diec` and probes it with `--version`.
+It does not check `die`, which starts the graphical interface.
+Record Detect It Easy scans with `orev run -- diec ...`.
 
 ### Ghidra discovery
 

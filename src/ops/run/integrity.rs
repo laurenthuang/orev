@@ -79,7 +79,7 @@ impl Monitor {
         let records = vec![
             Record::new(directory.to_owned(), File::open(directory)?)?,
             Record::new(directory.join("metadata.yaml"), metadata.try_clone()?)?,
-            Record::new(directory.join("output.log"), log.try_clone()?)?,
+            Record::new(directory.join("output.txt"), log.try_clone()?)?,
         ];
         verify(&records)?;
         let (stop, receiver) = mpsc::channel();
@@ -142,12 +142,12 @@ mod tests {
 
     #[test]
     fn unchanged_records_pass_and_replaced_paths_fail() {
-        for replaced in ["output.log", "metadata.yaml", "directory"] {
+        for replaced in ["output.txt", "metadata.yaml", "directory"] {
             let parent = tempfile::tempdir().unwrap();
             let directory = parent.path().join("records");
             fs::create_dir(&directory).unwrap();
             let metadata = File::create(directory.join("metadata.yaml")).unwrap();
-            let log = File::create(directory.join("output.log")).unwrap();
+            let log = File::create(directory.join("output.txt")).unwrap();
             Monitor::start(&directory, &metadata, &log)
                 .unwrap()
                 .finish()
@@ -173,12 +173,12 @@ mod tests {
 
     #[test]
     fn missing_records_fail_without_recreating_them() {
-        for removed in ["metadata.yaml", "output.log", "directory"] {
+        for removed in ["metadata.yaml", "output.txt", "directory"] {
             let parent = tempfile::tempdir().unwrap();
             let directory = parent.path().join("records");
             fs::create_dir(&directory).unwrap();
             let metadata = File::create(directory.join("metadata.yaml")).unwrap();
-            let log = File::create(directory.join("output.log")).unwrap();
+            let log = File::create(directory.join("output.txt")).unwrap();
             let monitor = Monitor::start(&directory, &metadata, &log).unwrap();
             let path = if removed == "directory" {
                 fs::remove_dir_all(&directory).unwrap();
@@ -199,10 +199,10 @@ mod tests {
         let directory = parent.path().join("records");
         fs::create_dir(&directory).unwrap();
         let metadata = File::create(directory.join("metadata.yaml")).unwrap();
-        let log = File::create(directory.join("output.log")).unwrap();
+        let log = File::create(directory.join("output.txt")).unwrap();
         let monitor = Monitor::start(&directory, &metadata, &log).unwrap();
         let moved = parent.path().join("moved");
-        let path = directory.join("output.log");
+        let path = directory.join("output.txt");
         fs::rename(&path, &moved).unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while !monitor.thread.as_ref().unwrap().is_finished() {

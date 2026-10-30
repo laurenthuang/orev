@@ -100,8 +100,8 @@ fn version_arg(name: &str) -> Option<&'static str> {
     match name {
         "java" | "javac" => Some("-version"),
         "r2" | "radare2" => Some("-v"),
-        "objdump" | "readelf" | "strings" | "gdb" | "lldb" | "binwalk" | "file" | "python"
-        | "python2" | "python3" | "qemu" => Some("--version"),
+        "objdump" | "readelf" | "strings" | "gdb" | "lldb" | "binwalk" | "file" | "magika"
+        | "diec" | "python" | "python2" | "python3" | "qemu" => Some("--version"),
         name if name.starts_with("qemu-") => Some("--version"),
         name if name.starts_with("python3.") || name.starts_with("python2.") => Some("--version"),
         name if ["-objdump", "-readelf", "-strings", "-gdb"]
@@ -219,6 +219,8 @@ mod tests {
             ("javac", "-version"),
             ("r2", "-v"),
             ("radare2", "-v"),
+            ("magika", "--version"),
+            ("diec", "--version"),
             ("python3.14", "--version"),
             ("qemu-system-aarch64", "--version"),
             ("aarch64-linux-gnu-objdump", "--version"),

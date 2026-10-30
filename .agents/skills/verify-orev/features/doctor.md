@@ -1,6 +1,6 @@
 # Doctor
 
-`orev doctor` reports the OS and CPU, validates the configuration in the current directory, and checks the expected directories. It then probes Java, `objdump`, `readelf`, `strings`, and Ghidra. Missing local directories and tools are `[!]` warnings. Invalid configured or inherited storage roots are errors.
+`orev doctor` reports the OS and CPU, validates the configuration in the current directory, and checks the expected directories. It then probes Java, `objdump`, `readelf`, `strings`, `file`, Magika, Detect It Easy (`diec`), and Ghidra. Missing local directories and tools are `[!]` warnings. Invalid configured or inherited storage roots are errors.
 
 ## Sub-features
 

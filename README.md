@@ -88,7 +88,7 @@ orev run -- readelf -h ./program
 ```
 
 Orev creates a separate record directory in the current directory.
-It contains `output.log` and `metadata.yaml`.
+It contains `output.txt` and `metadata.yaml`.
 No case configuration is required.
 See [Tool runs](docs/user/tool-runs.md) for argument handling, record fields, and privacy limits.
 

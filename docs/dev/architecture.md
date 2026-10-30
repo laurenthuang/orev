@@ -52,7 +52,7 @@ flowchart TD
     run --> integrity
     terminal --> redact
     terminal --> child["External tool process"]
-    run --> records["output.log and metadata.yaml<br/>Original open file handles"]
+    run --> records["output.txt and metadata.yaml<br/>Original open file handles"]
     terminal --> records
     integrity -. "Checks path identities" .-> records
 ```

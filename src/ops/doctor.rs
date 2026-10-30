@@ -115,7 +115,7 @@ pub fn run_doctor() -> io::Result<()> {
 
     // 4. 探查外部逆向分析工具链及其版本
     println!("\n--- External Toolchain & Versions ---");
-    for name in ["objdump", "readelf", "strings"] {
+    for name in ["objdump", "readelf", "strings", "file", "magika", "diec"] {
         report_tool(name, name, OsStr::new(name));
     }
 
